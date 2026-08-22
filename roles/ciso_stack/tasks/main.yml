@@ -12,13 +12,7 @@
     state: directory
     owner: "{{ ciso_deploy_user }}"
     group: "{{ ciso_deploy_user }}"
-    # 0751 et non 0750 : le proxy de la release tourne avec cap_drop: ALL,
-    # donc SANS DAC_OVERRIDE — son processus root est soumis aux bits de
-    # permission comme n'importe quel utilisateur et ne peut pas traverser un
-    # répertoire sans x. Le bit x pour « autres » autorise la traversée sans
-    # autoriser le listage ; les fichiers gardent leurs propres droits
-    # (.env en 0600, compose en 0640).
-    mode: "0751"
+    mode: "0750"
 
 - name: "Récupérer la release {{ ciso_suite_version }}"
   ansible.builtin.git:
