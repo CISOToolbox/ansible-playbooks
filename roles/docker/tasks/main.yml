@@ -3,11 +3,32 @@
 # docker.io est en retard et ne fournit pas le plugin `compose` v2, dont
 # la syntaxe `docker compose` (sans tiret) est utilisée partout ici.
 
+# Un hôte qui tourne déjà peut avoir Docker par un autre chemin — le paquet
+# docker.io d'Ubuntu, typiquement. Or docker-ce et docker.io sont en CONFLIT :
+# installer l'un désinstalle l'autre, ce qui arrêterait les conteneurs en
+# service. Un rôle d'installation ne doit pas faire ça sur une production.
+# On détecte donc l'existant et on ne touche à rien s'il fait l'affaire.
+- name: "Docker et compose v2 sont-ils déjà opérationnels ?"
+  ansible.builtin.command: docker compose version
+  register: _docker_present
+  changed_when: false
+  failed_when: false
+
+- name: "Docker déjà en place — installation ignorée"
+  ansible.builtin.debug:
+    msg: >-
+      {{ _docker_present.stdout | trim }} déjà présent : le rôle n'installe
+      rien. Pour repasser sur le dépôt officiel, désinstallez d'abord la
+      version en place — opération à faire hors production, elle arrête les
+      conteneurs.
+  when: _docker_present.rc == 0
+
 - name: "Clé du dépôt Docker"
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
     dest: /etc/apt/keyrings/docker.asc
     mode: "0644"
+  when: _docker_present.rc != 0
 
 - name: "Dépôt Docker"
   ansible.builtin.apt_repository:
@@ -17,6 +38,7 @@
       https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
     filename: docker
     state: present
+  when: _docker_present.rc != 0
 
 - name: "Docker CE + plugin compose"
   ansible.builtin.apt:
@@ -28,6 +50,7 @@
       - docker-compose-plugin
     state: present
     update_cache: true
+  when: _docker_present.rc != 0
 
 - name: "Service docker actif"
   ansible.builtin.service:
@@ -43,16 +66,16 @@
 # connexions SSH. Les commandes docker tournent en root via become, ce qui
 # donne le même résultat sans privilège permanent.
 
-- name: "Vérifier que compose v2 répond"
+- name: "Vérifier que compose v2 répond après installation"
   ansible.builtin.command: docker compose version
   register: _compose_v
   changed_when: false
-  when: not ansible_check_mode
+  when: not ansible_check_mode and _docker_present.rc != 0
 
 - name: "Version de compose"
   ansible.builtin.debug:
     msg: "{{ _compose_v.stdout }}"
-  when: not ansible_check_mode
+  when: not ansible_check_mode and _docker_present.rc != 0
 
 # Les images client sont privées : sans authentification, `compose pull`
 # échoue sur elles seules et laisse la stack à moitié à jour.
