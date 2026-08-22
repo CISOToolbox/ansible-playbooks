@@ -59,6 +59,25 @@
       de démarrer — nginx échoue si ssl_certificate pointe dans le vide.
   when: ciso_tls_mode == "existing"
 
+# En --check, le module git ANNONCE le clone sans le faire : l'arbre n'existe
+# pas et tout ce qui en dépend échouerait sur une conséquence de la simulation.
+# On le détecte pour sauter proprement, en disant ce qui n'a pas pu être
+# évalué — plutôt que de laisser croire à une configuration fautive.
+- name: "Arbre de la release présent ?"
+  ansible.builtin.stat:
+    path: "{{ ciso_deploy_dir }}/suite/docker-compose.yml"
+  register: _suite_tree
+
+- name: "Ce que la simulation ne peut pas couvrir"
+  ansible.builtin.debug:
+    msg: >-
+      L'arbre de la release n'est pas cloné et --check ne le clone pas :
+      la copie du compose, la substitution des images client, le rendu de
+      nginx.conf et la validation `docker compose config` ne sont pas
+      évalués ici. Les contrôles qui portent sur l'ÉTAT de l'hôte — volumes
+      de données, stack déjà en cours d'exécution — le sont, eux.
+  when: ansible_check_mode and not _suite_tree.stat.exists
+
 - name: "docker-compose.yml de la release"
   ansible.builtin.copy:
     remote_src: true
@@ -67,6 +86,7 @@
     owner: "{{ ciso_deploy_user }}"
     mode: "0640"
   register: _compose_file
+  when: _suite_tree.stat.exists or not ansible_check_mode
 
 # Les images client remplacent l'image de suite du module concerné. Le tag
 # et le digest de la release sont retirés : une image client a ses propres
@@ -79,7 +99,9 @@
   loop: "{{ ciso_client_images | dict2items }}"
   loop_control:
     label: "{{ item.key }} → {{ item.value }}"
-  when: ciso_client_images | length > 0
+  when:
+    - ciso_client_images | length > 0
+    - _suite_tree.stat.exists or not ansible_check_mode
   register: _client_images
 
 - name: "nginx.conf de la release"
@@ -89,6 +111,7 @@
     dest: "{{ ciso_deploy_dir }}/nginx.conf"
     owner: "{{ ciso_deploy_user }}"
     mode: "0640"
+  when: _suite_tree.stat.exists or not ansible_check_mode
   # Un `nginx -s reload` NE relit PAS ce fichier : il est monté comme fichier
   # unique, donc lié à son inode, et la plupart des éditeurs le remplacent.
   # Seule une recréation du conteneur prend l'édition en compte.
@@ -108,6 +131,7 @@
     cmd: docker compose config -q
     chdir: "{{ ciso_deploy_dir }}"
   changed_when: false
+  when: _suite_tree.stat.exists or not ansible_check_mode
 
 # Compose préfixe les volumes par le nom de projet. Se tromper de nom ne
 # produit AUCUNE erreur : la stack démarre sur des volumes neufs, les bases
@@ -119,6 +143,7 @@
     cmd: docker volume ls --format '{% raw %}{{.Name}}{% endraw %}'
   register: _volumes
   changed_when: false
+  check_mode: false      # lecture seule : doit tourner aussi en --check
 
 - name: "Le nom de projet correspond-il aux volumes existants ?"
   ansible.builtin.set_fact:
@@ -160,6 +185,7 @@
   register: _running_dir
   changed_when: false
   failed_when: false
+  check_mode: false      # lecture seule : doit tourner aussi en --check
 
 - name: "Refuser de démarrer une seconde stack depuis un autre répertoire"
   ansible.builtin.assert:
