@@ -373,6 +373,24 @@ pas. Des clés séparées permettent d'en confier une sans livrer l'autre. La
 perdre rend les sauvegardes externes irrécupérables, au même titre que
 `vault_backup_cipher` pour le dépôt local.
 
+> **Un stockage objet interne doit servir en HTTPS.** pgBackRest parle TLS à
+> un dépôt S3. Contre un point d'accès en clair, l'appel ne échoue pas : il
+> *pend*. Or un `archive_command` qui pend bloque l'arrêt de PostgreSQL, et
+> au premier démarrage le conteneur meurt sur `pg_ctl: server does not shut
+> down` — un symptôme qui ne désigne en rien le stockage. Pour un MinIO
+> interne, servez en HTTPS et fournissez son autorité :
+>
+> ```yaml
+> ciso_backup_s3:
+>   storage_ca_file: "/certs/minio-ca.crt"   # chemin DANS les conteneurs
+>   uri_style: "path"                         # MinIO adresse par chemin
+> ```
+>
+> Le playbook active alors une surcharge supplémentaire. Montez le
+> certificat vous-même dans les conteneurs : la suite ne le fait pas à votre
+> place. Les hébergeurs publics présentent des certificats reconnus et n'ont
+> besoin de rien de tout cela.
+
 **Restreignez les identifiants au seul bucket**, en écriture seule si votre
 hébergeur le permet : un rançongiciel qui prend l'hôte ne doit pas pouvoir
 effacer les sauvegardes. Le verrouillage d'objet côté bucket est la seule

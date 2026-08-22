@@ -192,12 +192,15 @@
 - name: "docker-compose.s3.yml de la release"
   ansible.builtin.copy:
     remote_src: true
-    src: "{{ ciso_deploy_dir }}/suite/docker-compose.s3.yml"
-    dest: "{{ ciso_deploy_dir }}/docker-compose.s3.yml"
+    src: "{{ ciso_deploy_dir }}/suite/{{ item }}"
+    dest: "{{ ciso_deploy_dir }}/{{ item }}"
     owner: "{{ ciso_deploy_user }}"
     mode: "0640"
+  loop:
+    - docker-compose.s3.yml
+    - docker-compose.s3-ca.yml
   when: _suite_tree.stat.exists or not ansible_check_mode
-  failed_when: false      # absente des releases antérieures à FEAT-29
+  failed_when: false      # absentes des releases antérieures à FEAT-29
 
 - name: "Configuration S3 complète ?"
   ansible.builtin.assert:
