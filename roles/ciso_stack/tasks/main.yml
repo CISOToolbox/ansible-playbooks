@@ -173,43 +173,57 @@
       « {{ _project }} » — la stack retrouvera ses bases.
 
 # Les conteneurs portent des noms fixes (ciso-pilot, ciso-risk-db…). Si une
-# stack du même projet tourne depuis un AUTRE répertoire — cas d'un
+# stack du même projet existe depuis un AUTRE répertoire — cas d'un
 # déplacement de /home vers /opt — `up -d` échoue sur un conflit de noms au
 # message obscur. Compose étiquette chaque conteneur avec son répertoire
-# d'origine : on le lit pour dire précisément quoi faire.
+# d'origine : on interroge le démon, pas le système de fichiers, et on le lit
+# pour dire précisément quoi faire.
+#
+# On sonde TOUS les conteneurs du projet, pas seulement ciso-pilot : une stack
+# partielle (Pilot retiré à la main, modules restants) échapperait sinon au
+# contrôle tout en faisant échouer le démarrage.
 - name: "Conteneurs d'une stack existante ?"
   ansible.builtin.command:
     cmd: >-
-      docker inspect ciso-pilot
-      --format '{% raw %}{{ index .Config.Labels "com.docker.compose.project.working_dir" }}|{{ .State.Running }}{% endraw %}'
-  register: _running_dir
+      docker ps -a
+      --filter label=com.docker.compose.project={{ ciso_env.COMPOSE_PROJECT_NAME }}
+      --format '{% raw %}{{.Label "com.docker.compose.project.working_dir"}}|{{.State}}{% endraw %}'
+  register: _existing
   changed_when: false
   failed_when: false
   check_mode: false      # lecture seule : doit tourner aussi en --check
 
 - name: "État et provenance des conteneurs existants"
   ansible.builtin.set_fact:
-    _other_dir: "{{ (_running_dir.stdout | trim).split('|')[0] | default('', true) }}"
-    _other_up: "{{ (_running_dir.stdout | trim).split('|')[-1] | trim == 'true' }}"
-  when: _running_dir.rc == 0
+    _other_dirs: >-
+      {{ _existing.stdout_lines | map('regex_replace', '\|.*$', '')
+         | reject('equalto', ciso_deploy_dir) | reject('equalto', '')
+         | unique | list }}
+    _other_up: >-
+      {{ _existing.stdout_lines | select('search', '\|running$')
+         | list | length > 0 }}
 
 # `docker compose stop` ne suffit PAS : il arrête les conteneurs sans les
 # supprimer, et leurs noms restent réservés. C'est le geste naturel quand on
 # lit « une stack tourne déjà », d'où la distinction explicite ci-dessous.
 - name: "Refuser de démarrer une seconde stack depuis un autre répertoire"
   ansible.builtin.assert:
-    that: _running_dir.rc != 0 or _other_dir in ["", ciso_deploy_dir]
+    that: _other_dirs | length == 0
     fail_msg: >-
-      Des conteneurs de cette stack existent déjà
-      ({{ "en cours d'exécution" if _other_up | bool else "arrêtés, mais toujours présents" }})
-      et proviennent de « {{ _other_dir }} », alors que ce déploiement vise
-      « {{ ciso_deploy_dir }} ». Leurs noms étant fixes, démarrer ici
-      échouerait sur un conflit.
+      Des conteneurs du projet « {{ ciso_env.COMPOSE_PROJECT_NAME }} » existent
+      déjà ({{ "certains en cours d'exécution" if _other_up | bool else "arrêtés, mais toujours présents" }})
+      et proviennent de {{ _other_dirs | map('regex_replace', '^(.*)$', '« \1 »') | join(', ') }},
+      alors que ce déploiement vise « {{ ciso_deploy_dir }} ». Leurs noms étant
+      fixes, démarrer ici échouerait sur un conflit.
       {{ "Attention : `docker compose stop` ne libère pas les noms — il faut SUPPRIMER les conteneurs." if not (_other_up | bool) else "" }}
       Utilisez `down`, SANS -v qui détruirait les volumes :
-        cd {{ _other_dir }} && docker compose down
+      {% for d in _other_dirs %}  cd {{ d }} && docker compose down
+      {% endfor %}
       Les données sont dans les volumes {{ ciso_env.COMPOSE_PROJECT_NAME }}_*,
       indépendants du répertoire : elles seront retrouvées ici.
+    success_msg: >-
+      Aucun conteneur du projet « {{ ciso_env.COMPOSE_PROJECT_NAME }} » ne
+      provient d'un autre répertoire — pas de conflit de noms attendu.
 
 - name: "Tirer les images de la release"
   ansible.builtin.command:
