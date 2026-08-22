@@ -44,6 +44,25 @@
     - ansible_check_mode
     - _ufw_bin.rc != 0
 
+# Ubuntu livre DEFAULT_FORWARD_POLICY="DROP". Or la sortie d'un conteneur vers
+# l'extérieur passe par FORWARD : Surface qui scanne, Watch qui tire les flux
+# CVE, le relais SMTP, `docker compose pull`. Docker pose des règles ACCEPT
+# au-dessus des chaînes d'ufw, donc activer ufw ne casse rien SUR LE MOMENT —
+# la panne arrive au premier `ufw reload` ou `systemctl restart ufw`, qui
+# réinsère les chaînes d'ufw en tête. Des semaines plus tard, sans rapport
+# apparent avec sa cause.
+#
+# On passe donc la politique à ACCEPT et on laisse Docker arbitrer le trafic
+# forwardé — ce qu'il fait de toute façon, ufw n'ayant aucune prise dessus.
+# Cela ne relâche rien : c'est écrire ce qui est déjà vrai, au lieu de laisser
+# un DROP inopérant qui deviendra opérant au pire moment.
+- name: "ufw — ne pas casser le trafic sortant des conteneurs"
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: '^DEFAULT_FORWARD_POLICY='
+    line: 'DEFAULT_FORWARD_POLICY="ACCEPT"'
+  when: _configurable | bool
+
 # L'ordre compte : autoriser AVANT d'activer, sinon `ufw enable` coupe la
 # session SSH en cours et l'hôte devient injoignable.
 - name: "ufw est-il configurable ici ?"
