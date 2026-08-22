@@ -10,3 +10,4 @@
   ansible.builtin.command:
     cmd: docker compose up -d --force-recreate proxy
     chdir: "{{ ciso_deploy_dir }}"
+  tags: [always]

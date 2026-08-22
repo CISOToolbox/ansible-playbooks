@@ -46,6 +46,50 @@ un montage bind résout son chemin côté hôte au moment du montage, et le
 processus du conteneur ne traverse que son propre arbre. Le mode du
 répertoire de déploiement ne joue donc aucun rôle ici.
 
+## (Ré)installer les certificats
+
+Trois postures, selon la façon dont le certificat arrive.
+
+**`provided`** — les fichiers vivent sur le nœud de contrôle et le playbook
+les dépose. C'est le mode à choisir pour un déploiement reproductible depuis
+zéro :
+
+```bash
+mkdir -p files/certs/<domaine>
+cp fullchain.pem files/certs/<domaine>/cert.pem
+cp privkey.pem   files/certs/<domaine>/key.pem
+```
+
+Les noms de destination sont ceux de `ciso_tls_cert_name` /
+`ciso_tls_key_name` (`cert.pem` / `key.pem` par défaut) : le fichier source
+doit porter le même nom que sa destination.
+
+`files/certs/` est exclu par le `.gitignore` du dépôt. Pour versionner malgré
+tout la clé — utile quand plusieurs personnes déploient — chiffrez-la, le
+module `copy` déchiffre les sources vaultées de façon transparente :
+
+```bash
+ansible-vault encrypt files/certs/<domaine>/key.pem
+```
+
+**`existing`** — les fichiers sont déjà sur l'hôte (certbot, PKI d'entreprise).
+Le playbook vérifie leur présence et corrige leurs droits, sans les écraser.
+
+**`selfsigned`** — génère un certificat auto-signé sur l'hôte, avec un SAN
+couvrant le domaine et ses sous-domaines. **Maquettes uniquement** : aucun
+navigateur ne le validera. Régénérer suppose de supprimer le certificat
+existant, la tâche étant idempotente par `creates`.
+
+Dans tous les cas, rejouer les certificats seuls — sans toucher au reste :
+
+```bash
+ansible-playbook site.yml --tags certs --limit <hôte>
+```
+
+Le proxy est recréé automatiquement si un fichier a changé. Une simple
+recopie ne suffirait pas : `nginx.conf` est monté comme fichier unique, donc
+attaché à son inode.
+
 ## Les trois playbooks
 
 | Playbook | Rôle |

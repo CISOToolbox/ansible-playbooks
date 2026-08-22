@@ -29,6 +29,15 @@
 # autre outil (ACME, PKI d'entreprise), ou auto-signé pour une maquette.
 # Les NOMS de fichiers sont variables : nginx.conf de la release attend
 # cert.pem / key.pem, mais un déploiement existant peut les nommer autrement.
+- name: "Répertoire des certificats"
+  ansible.builtin.file:
+    path: "{{ ciso_deploy_dir }}/certs"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  tags: [certs]
+
 - name: "Certificats TLS fournis depuis le nœud de contrôle"
   ansible.builtin.copy:
     src: "certs/{{ ciso_domain }}/{{ item }}"
@@ -40,6 +49,7 @@
     - "{{ ciso_tls_key_name }}"
   when: ciso_tls_mode == "provided"
   notify: redémarrer le proxy
+  tags: [certs]
 
 - name: "Certificats TLS déjà présents sur l'hôte"
   ansible.builtin.stat:
@@ -49,6 +59,7 @@
     - "{{ ciso_tls_key_name }}"
   register: _tls_stat
   when: ciso_tls_mode == "existing"
+  tags: [certs]
 
 - name: "Vérifier que les certificats existants sont bien là"
   ansible.builtin.assert:
@@ -58,6 +69,53 @@
       {{ ciso_tls_cert_name }} et {{ ciso_tls_key_name }}. Le proxy refuserait
       de démarrer — nginx échoue si ssl_certificate pointe dans le vide.
   when: ciso_tls_mode == "existing"
+  tags: [certs]
+
+# Maquette uniquement : un certificat auto-signé fait démarrer le proxy et
+# lever le TLS, mais tout navigateur l'affichera comme non fiable. Le SAN
+# couvre le domaine et ses sous-domaines, faute de quoi les modules servis
+# sur un sous-domaine échoueraient là où la racine passerait.
+- name: "Certificat auto-signé (maquette)"
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:4096
+      - -nodes
+      - -days
+      - "825"
+      - -subj
+      - "/CN={{ ciso_domain }}"
+      - -addext
+      - "subjectAltName=DNS:{{ ciso_domain }},DNS:*.{{ ciso_domain }}"
+      - -keyout
+      - "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_key_name }}"
+      - -out
+      - "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_cert_name }}"
+    creates: "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_cert_name }}"
+  when: ciso_tls_mode == "selfsigned"
+  notify: redémarrer le proxy
+  tags: [certs]
+
+- name: "Rappeler qu'un certificat auto-signé n'est pas fiable"
+  ansible.builtin.debug:
+    msg: >-
+      ciso_tls_mode=selfsigned : le proxy sert un certificat auto-signé pour
+      {{ ciso_domain }}. Aucun navigateur ne le considérera comme valide —
+      réservé aux maquettes.
+  when: ciso_tls_mode == "selfsigned"
+  tags: [certs]
+
+- name: "Refuser un mode TLS inconnu"
+  ansible.builtin.assert:
+    that: ciso_tls_mode in ["provided", "existing", "selfsigned"]
+    fail_msg: >-
+      ciso_tls_mode vaut « {{ ciso_tls_mode }} », qui n'est pas reconnu.
+      Sans certificat déposé, le proxy boucle sur un ssl_certificate
+      introuvable. Valeurs acceptées : provided, existing, selfsigned.
+  tags: [certs]
 
 # En --check, le module git ANNONCE le clone sans le faire : l'arbre n'existe
 # pas et tout ce qui en dépend échouerait sur une conséquence de la simulation.
@@ -100,6 +158,7 @@
   loop_control:
     label: "{{ item.path }}"
   notify: redémarrer le proxy
+  tags: [certs]
 
 - name: "docker-compose.yml de la release"
   ansible.builtin.copy:
