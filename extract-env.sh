@@ -92,8 +92,12 @@ cat <<'EOF'
 
 Suite :
   1. relire ciso_env.yml (ne doit contenir AUCUN secret)
-  2. fusionner son contenu dans group_vars/all.yml
-  3. mv vault_env.yml group_vars/all.vault.yml
-     ansible-vault encrypt group_vars/all.vault.yml
+  2. fusionner son contenu dans group_vars/all/main.yml
+  3. mv vault_env.yml group_vars/all/vault.yml
+     ansible-vault encrypt group_vars/all/vault.yml
+     ATTENTION : la forme REPERTOIRE (group_vars/all/) est
+     obligatoire. Un fichier group_vars/all.vault.yml ne serait
+     jamais chargé — Ansible associe un fichier au groupe portant
+     exactement son nom, et « all.vault » n'est pas « all ».
   4. shred -u ciso_env.yml   (une fois recopié)
 EOF

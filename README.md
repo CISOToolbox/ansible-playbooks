@@ -18,10 +18,10 @@ une composition que personne n'a validée.
 
 ```bash
 cp inventory/hosts.yml.example inventory/hosts.yml
-cp group_vars/all.vault.yml.example group_vars/all.vault.yml
+cp group_vars/all/vault.yml.example group_vars/all/vault.yml
 
 # Générer les secrets (openssl rand -hex 32 pour chacun), puis chiffrer
-ansible-vault encrypt group_vars/all.vault.yml
+ansible-vault encrypt group_vars/all/vault.yml
 echo "monmotdepasse" > .vault_pass && chmod 600 .vault_pass
 
 ansible-galaxy collection install -r requirements.yml

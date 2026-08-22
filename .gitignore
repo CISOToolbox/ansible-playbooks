@@ -1,4 +1,4 @@
 .vault_pass
 inventory/hosts.yml
-group_vars/all.vault.yml
+group_vars/all/vault.yml
 files/certs/

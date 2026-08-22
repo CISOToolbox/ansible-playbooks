@@ -1,7 +1,13 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────
 # CISO Toolbox — variables communes (valeurs NON secrètes)
-# Les secrets vivent dans all.vault.yml, chiffré par ansible-vault.
+#
+# Les secrets vivent dans group_vars/all/vault.yml, chiffré par
+# ansible-vault. La forme RÉPERTOIRE est obligatoire : Ansible charge
+# tous les fichiers de group_vars/all/, mais associerait un fichier
+# nommé group_vars/all.vault.yml à un groupe « all.vault » qui
+# n'existe pas — il ne serait jamais lu, et les variables seraient
+# introuvables à l'exécution.
 # ─────────────────────────────────────────────────────────────────────────
 
 # La version de suite déployée. C'est LA variable qui pilote les montées de
