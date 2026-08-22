@@ -1,8 +1,12 @@
 ---
 # Recréation, pas rechargement : nginx.conf est monté comme fichier unique,
 # donc attaché à son inode. Un `nginx -s reload` relirait l'ancien contenu.
+#
+# En root, comme toutes les commandes Docker de ce rôle. Le compte de
+# déploiement n'a pas accès à /var/run/docker.sock, et l'y ajouter via le
+# groupe `docker` reviendrait à lui donner l'équivalent de root sur l'hôte —
+# un prix disproportionné pour recréer un conteneur.
 - name: redémarrer le proxy
   ansible.builtin.command:
     cmd: docker compose up -d --force-recreate proxy
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
