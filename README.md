@@ -173,6 +173,23 @@ Une fois la bascule vérifiée, l'ancien répertoire ne contient plus que des
 fichiers de configuration régénérables. Le supprimer est sans effet sur les
 données.
 
+Reste un piège que `down` ne traite pas : un **démarrage automatique** qui
+relance l'ancien répertoire. `down` supprime les conteneurs, donc leurs
+politiques `restart` — mais pas une unité systemd, un cron `@reboot` ou un
+`rc.local`. Ceux-là survivent et ne se manifestent qu'au prochain
+redémarrage, quand deux stacks se disputent les mêmes noms de conteneurs et
+les mêmes ports, des semaines après la bascule.
+
+La release s'appuie sur `restart: unless-stopped` : la stack revient seule au
+boot, sans unité ni cron. Tout mécanisme externe trouvé est donc à
+désactiver, et le playbook le signale. Les unités **utilisateur** échappent à
+sa recherche, vérifiez-les à la main :
+
+```bash
+systemctl --user list-unit-files --state=enabled
+loginctl show-user <compte> -p Linger    # Linger=yes ⇒ démarrent sans session
+```
+
 ## Décrire un hôte
 
 Un déploiement se décrit dans `host_vars/<nom-de-l-hote>.yml`, où le nom doit

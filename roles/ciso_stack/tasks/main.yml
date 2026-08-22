@@ -225,6 +225,35 @@
       Aucun conteneur du projet « {{ ciso_env.COMPOSE_PROJECT_NAME }} » ne
       provient d'un autre répertoire — pas de conflit de noms attendu.
 
+# Après un déplacement, `down` supprime les conteneurs et donc leurs politiques
+# `restart`. Mais un mécanisme EXTERNE — unité systemd, cron @reboot, rc.local —
+# qui relance l'ancien répertoire survit à l'opération et ne se manifeste qu'au
+# prochain redémarrage : deux stacks se disputent alors les mêmes noms de
+# conteneurs et les mêmes ports, des semaines après la bascule.
+#
+# La release s'appuie sur `restart: unless-stopped`, donc AUCUN mécanisme
+# externe n'est nécessaire ici : tout ce qu'on trouve est suspect.
+- name: "Mécanismes de démarrage au boot pointant ailleurs"
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rnsE 'docker[ -]compose'
+      /etc/systemd/system /etc/cron.d /etc/crontab /var/spool/cron/crontabs
+      2>/dev/null | grep -v {{ ciso_deploy_dir | quote }} || true
+  register: _boot_hooks
+  changed_when: false
+  check_mode: false      # lecture seule : doit tourner aussi en --check
+
+- name: "Avertir d'un démarrage automatique concurrent"
+  ansible.builtin.debug:
+    msg: >-
+      ATTENTION — un mécanisme de démarrage automatique référence un
+      déploiement autre que « {{ ciso_deploy_dir }} ». Au prochain
+      redémarrage, deux stacks se disputeront les mêmes noms de conteneurs.
+      La release utilise `restart: unless-stopped` et n'a besoin d'aucune
+      unité ni cron : désactivez ce qui suit.
+      {{ _boot_hooks.stdout_lines | join(' | ') }}
+  when: _boot_hooks.stdout | trim | length > 0
+
 - name: "Tirer les images de la release"
   ansible.builtin.command:
     cmd: docker compose pull
