@@ -1,0 +1,44 @@
+---
+- name: "Vérifier la distribution (Ubuntu 24.04 LTS attendu)"
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version("24.04", ">=")
+    fail_msg: >-
+      Ce rôle cible Ubuntu 24.04 LTS ({{ ansible_distribution }}
+      {{ ansible_distribution_version }} détecté). Les noms de paquets et
+      les dépôts Docker diffèrent ailleurs.
+
+- name: "Paquets système requis"
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - ufw
+      - unattended-upgrades
+      - fail2ban
+      - python3-requests      # requis par community.docker
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "Utilisateur de déploiement"
+  ansible.builtin.user:
+    name: "{{ ciso_deploy_user }}"
+    system: false
+    shell: /bin/bash
+    create_home: true
+
+- name: "Mises à jour de sécurité automatiques"
+  ansible.builtin.service:
+    name: unattended-upgrades
+    state: started
+    enabled: true
+
+- name: "fail2ban actif"
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true

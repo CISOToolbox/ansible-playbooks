@@ -1,0 +1,106 @@
+---
+# Montée vers une autre release de suite.
+#
+#   1. changer ciso_suite_version dans group_vars/all.yml
+#   2. ansible-playbook upgrade.yml
+#
+# Ce playbook fait ce que site.yml fait, plus les contrôles qui n'ont de sens
+# que lors d'une mise à jour. Il refuse de tourner sans sauvegarde préalable :
+# les migrations Alembic ne sont pas réversibles.
+- name: "CISO Toolbox — montée de version"
+  hosts: ciso
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: "Version actuellement déployée"
+      ansible.builtin.command:
+        cmd: git -C "{{ ciso_deploy_dir }}/suite" describe --tags --exact-match
+      register: _current
+      changed_when: false
+      failed_when: false
+
+    - name: "Version — de … vers …"
+      ansible.builtin.debug:
+        msg: "{{ _current.stdout | default('inconnue', true) }} → {{ ciso_suite_version }}"
+
+    # Une migration Alembic ne se rejoue pas à l'envers. Sans dump, un
+    # échec en cours de mise à jour ne laisse aucun retour en arrière.
+    - name: "Dump de sécurité de chaque base"
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          docker compose exec -T {{ item }}-db pg_dump -U {{ item }} {{ item }}
+          | gzip > {{ ciso_deploy_dir }}/dumps/{{ item }}-{{ ansible_date_time.date }}.sql.gz
+        chdir: "{{ ciso_deploy_dir }}"
+        executable: /bin/bash
+      become_user: "{{ ciso_deploy_user }}"
+      loop: "{{ ciso_backup_expect_stanzas }}"
+      register: _dumps
+      failed_when: _dumps.rc != 0
+      changed_when: true
+
+    - name: "Dumps produits"
+      ansible.builtin.find:
+        paths: "{{ ciso_deploy_dir }}/dumps"
+        patterns: "*-{{ ansible_date_time.date }}.sql.gz"
+        size: 1k          # un dump vide signale une base injoignable
+      register: _dump_files
+
+    - name: "Refuser la mise à jour si un dump est vide ou manquant"
+      ansible.builtin.assert:
+        that: _dump_files.files | length == ciso_backup_expect_stanzas | length
+        fail_msg: >-
+          {{ _dump_files.files | length }} dump(s) exploitable(s) pour
+          {{ ciso_backup_expect_stanzas | length }} base(s) attendue(s).
+          Mise à jour interrompue — sans sauvegarde, une migration ratée
+          serait sans retour.
+
+  roles:
+    - { role: ciso_stack, tags: [stack] }
+
+  post_tasks:
+    # Les migrations s'appliquent au démarrage du conteneur. Si elles ont
+    # échoué, le module tourne sur un schéma qui ne correspond pas au code.
+    - name: "Migrations appliquées au démarrage"
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          docker compose logs --since 10m {{ item }}-app 2>&1
+          | grep -iE 'running upgrade|alembic' | tail -5 || true
+        chdir: "{{ ciso_deploy_dir }}"
+        executable: /bin/bash
+      become_user: "{{ ciso_deploy_user }}"
+      loop: "{{ ciso_backup_expect_stanzas }}"
+      register: _migrations
+      changed_when: false
+
+    - name: "Trace des migrations"
+      ansible.builtin.debug:
+        msg: "{{ item.item }} : {{ item.stdout_lines | default(['(aucune)']) }}"
+      loop: "{{ _migrations.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "Erreurs applicatives depuis la mise à jour"
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          docker compose logs --since 10m 2>&1
+          | grep -icE 'traceback|critical|refusing to start' || true
+        chdir: "{{ ciso_deploy_dir }}"
+        executable: /bin/bash
+      become_user: "{{ ciso_deploy_user }}"
+      register: _errors
+      changed_when: false
+
+    - name: "Alerte sur erreurs au démarrage"
+      ansible.builtin.debug:
+        msg: >-
+          {{ _errors.stdout | trim }} ligne(s) d'erreur dans les logs depuis
+          la mise à jour — inspecter avec : docker compose logs --since 10m
+      when: (_errors.stdout | trim | int) > 0
+
+    - name: "Contrôle des sauvegardes"
+      ansible.builtin.include_role:
+        name: backup_verify

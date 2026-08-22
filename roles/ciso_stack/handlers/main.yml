@@ -1,0 +1,8 @@
+---
+# Recréation, pas rechargement : nginx.conf est monté comme fichier unique,
+# donc attaché à son inode. Un `nginx -s reload` relirait l'ancien contenu.
+- name: redémarrer le proxy
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate proxy
+    chdir: "{{ ciso_deploy_dir }}"
+  become_user: "{{ ciso_deploy_user }}"

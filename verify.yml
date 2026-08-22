@@ -1,0 +1,40 @@
+---
+# Contrôles d'exploitation, sans rien modifier.
+#
+#   ansible-playbook verify.yml
+- name: "CISO Toolbox — vérifications"
+  hosts: ciso
+  become: true
+  gather_facts: false
+  tasks:
+    - name: "Images réellement en service"
+      ansible.builtin.command:
+        cmd: docker compose ps --format '{% raw %}{{.Service}}\t{{.Image}}\t{{.Status}}{% endraw %}'
+        chdir: "{{ ciso_deploy_dir }}"
+      become_user: "{{ ciso_deploy_user }}"
+      register: _ps
+      changed_when: false
+
+    - name: "État de la stack"
+      ansible.builtin.debug:
+        var: _ps.stdout_lines
+
+    - name: "Réponse HTTP de chaque module par la bordure"
+      ansible.builtin.uri:
+        url: "https://{{ ciso_domain }}/{{ item }}/"
+        validate_certs: "{{ ciso_tls_mode == 'provided' }}"
+        status_code: [200, 302, 401]
+      loop: "{{ ciso_modules }}"
+      register: _http
+      failed_when: false
+      changed_when: false
+
+    - name: "Modules injoignables"
+      ansible.builtin.debug:
+        msg: >-
+          {{ _http.results | rejectattr('status', 'in', [200, 302, 401])
+             | map(attribute='item') | list | default('aucun', true) }}
+
+    - name: "Contrôle des sauvegardes"
+      ansible.builtin.include_role:
+        name: backup_verify

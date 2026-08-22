@@ -1,0 +1,128 @@
+---
+# Déploie la stack CISO Toolbox à partir d'une release publiée.
+#
+# Principe : on ne réécrit JAMAIS docker-compose.yml ni nginx.conf à la main.
+# Ils viennent du dépôt public au tag `ciso_suite_version`, qui décrit une
+# combinaison de modules testée ensemble. Monter de version = changer cette
+# variable et rejouer.
+
+- name: "Répertoire de déploiement"
+  ansible.builtin.file:
+    path: "{{ ciso_deploy_dir }}"
+    state: directory
+    owner: "{{ ciso_deploy_user }}"
+    group: "{{ ciso_deploy_user }}"
+    mode: "0750"
+
+- name: "Récupérer la release {{ ciso_suite_version }}"
+  ansible.builtin.git:
+    repo: "{{ ciso_suite_repo }}"
+    dest: "{{ ciso_deploy_dir }}/suite"
+    version: "{{ ciso_suite_version }}"
+    depth: 1
+    force: true            # les fichiers viennent du dépôt, jamais édités ici
+  become_user: "{{ ciso_deploy_user }}"
+  register: _suite_git
+
+- name: "Certificats TLS fournis"
+  ansible.builtin.copy:
+    src: "certs/{{ ciso_domain }}/{{ item }}"
+    dest: "{{ ciso_deploy_dir }}/certs/{{ item }}"
+    owner: "{{ ciso_deploy_user }}"
+    mode: "0640"
+  loop: [fullchain.pem, privkey.pem]
+  when: ciso_tls_mode == "provided"
+  notify: redémarrer le proxy
+
+- name: "docker-compose.yml de la release"
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ciso_deploy_dir }}/suite/docker-compose.yml"
+    dest: "{{ ciso_deploy_dir }}/docker-compose.yml"
+    owner: "{{ ciso_deploy_user }}"
+    mode: "0640"
+  register: _compose_file
+
+# Les images client remplacent l'image de suite du module concerné. Le tag
+# et le digest de la release sont retirés : une image client a ses propres
+# empreintes, et laisser le digest d'origine ferait échouer le pull.
+- name: "Substituer les images client"
+  ansible.builtin.replace:
+    path: "{{ ciso_deploy_dir }}/docker-compose.yml"
+    regexp: '^(\s+image:\s*)\S*ciso-{{ item.key }}-suite:\S+$'
+    replace: '\1{{ item.value }}'
+  loop: "{{ ciso_client_images | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} → {{ item.value }}"
+  when: ciso_client_images | length > 0
+  register: _client_images
+
+- name: "nginx.conf de la release"
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ciso_deploy_dir }}/suite/nginx.conf"
+    dest: "{{ ciso_deploy_dir }}/nginx.conf"
+    owner: "{{ ciso_deploy_user }}"
+    mode: "0640"
+  # Un `nginx -s reload` NE relit PAS ce fichier : il est monté comme fichier
+  # unique, donc lié à son inode, et la plupart des éditeurs le remplacent.
+  # Seule une recréation du conteneur prend l'édition en compte.
+  notify: redémarrer le proxy
+
+- name: ".env"
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ ciso_deploy_dir }}/.env"
+    owner: "{{ ciso_deploy_user }}"
+    mode: "0600"
+  register: _env_file
+  no_log: true
+
+- name: "Valider le compose avant tout démarrage"
+  ansible.builtin.command:
+    cmd: docker compose config -q
+    chdir: "{{ ciso_deploy_dir }}"
+  become_user: "{{ ciso_deploy_user }}"
+  changed_when: false
+
+- name: "Tirer les images de la release"
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: "{{ ciso_deploy_dir }}"
+  become_user: "{{ ciso_deploy_user }}"
+  changed_when: true
+
+- name: "Démarrer la stack"
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ ciso_deploy_dir }}"
+  become_user: "{{ ciso_deploy_user }}"
+  changed_when: true
+
+- name: "Attendre que les services soient sains"
+  ansible.builtin.shell:
+    cmd: >-
+      docker compose ps --format '{% raw %}{{.Service}} {{.Health}}{% endraw %}'
+      | grep -- '-app ' | grep -cv healthy || true
+    chdir: "{{ ciso_deploy_dir }}"
+  become_user: "{{ ciso_deploy_user }}"
+  register: _unhealthy
+  until: _unhealthy.stdout | trim == "0"
+  retries: 30
+  delay: 10
+  changed_when: false
+
+# Le contrôle qui a manqué lors de la migration BDFG : ni le contenu du
+# compose ni l'absence d'erreur dans les logs ne prouvent qu'un conteneur
+# tourne sur la bonne image. Seule la colonne Image de `compose ps` fait foi.
+- name: "Images réellement en service"
+  ansible.builtin.command:
+    cmd: docker compose ps --format '{% raw %}{{.Service}}\t{{.Image}}{% endraw %}'
+    chdir: "{{ ciso_deploy_dir }}"
+  become_user: "{{ ciso_deploy_user }}"
+  register: _running_images
+  changed_when: false
+
+- name: "Récapitulatif des images"
+  ansible.builtin.debug:
+    var: _running_images.stdout_lines

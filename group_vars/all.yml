@@ -1,0 +1,67 @@
+---
+# ─────────────────────────────────────────────────────────────────────────
+# CISO Toolbox — variables communes (valeurs NON secrètes)
+# Les secrets vivent dans all.vault.yml, chiffré par ansible-vault.
+# ─────────────────────────────────────────────────────────────────────────
+
+# La version de suite déployée. C'est LA variable qui pilote les montées de
+# version : le playbook récupère docker-compose.yml et nginx.conf à ce tag
+# précis du dépôt public. Un tag décrit une combinaison de modules testée
+# ensemble (cf. la matrice de compatibilité dans RELEASING.md) — d'où
+# l'interdiction d'écrire "main" ici.
+ciso_suite_version: "v0.9.2"
+ciso_suite_repo: "https://github.com/CISOToolbox/suite.git"
+
+# Où la stack est déployée sur l'hôte.
+ciso_deploy_dir: "/opt/ciso-toolbox"
+ciso_deploy_user: "ciso"
+
+# Domaine servi par le proxy. Doit correspondre au SAN du certificat.
+ciso_domain: "ciso.example.com"
+ciso_http_port: 80
+ciso_https_port: 443
+
+# Modules effectivement déployés. Sert à deux choses : la variable
+# PILOT_MODULES (Pilot n'affiche que ceux-là) et les contrôles de santé.
+# Retirer un module ici ne le supprime pas de docker-compose.yml — voir
+# README §"Retirer un module".
+ciso_modules:
+  - risk
+  - compliance
+  - vendor
+  - asset
+  - access
+  - audit
+  - surface
+  - appsec
+  - watch
+
+# Images client, qui remplacent l'image de suite du module correspondant.
+# Laisser vide pour un déploiement standard. Exemple :
+#   ciso_client_images:
+#     surface: "ghcr.io/cisotoolbox/ciso-surface-bdfg:v1.0.0"
+#     access:  "ghcr.io/cisotoolbox/ciso-access-bdfg:v1.0.0"
+ciso_client_images: {}
+
+# Registre : nécessaire uniquement si des images client (privées) sont
+# utilisées. Le mot de passe vit dans le vault.
+ciso_registry: "ghcr.io"
+ciso_registry_user: ""
+
+# Certificats TLS. Deux modes :
+#   "provided" — les fichiers sont fournis depuis le control node
+#                (files/certs/<domaine>/fullchain.pem + privkey.pem)
+#   "selfsigned" — génération locale, pour une maquette uniquement
+ciso_tls_mode: "provided"
+
+# Ports ouverts par ufw. 22 est indispensable, ne pas le retirer sous peine
+# de perdre l'accès à l'hôte au premier `ufw enable`.
+ciso_firewall_ports:
+  - "22"
+  - "{{ ciso_http_port }}"
+  - "{{ ciso_https_port }}"
+
+# Sauvegardes : la stack embarque backup-agent (pgBackRest). Ces valeurs ne
+# font que piloter les contrôles du playbook, la planification réelle est
+# dans le conteneur.
+ciso_backup_expect_stanzas: "{{ ciso_modules + ['pilot'] }}"

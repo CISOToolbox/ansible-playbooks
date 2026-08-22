@@ -1,0 +1,21 @@
+---
+# L'ordre compte : autoriser AVANT d'activer, sinon `ufw enable` coupe la
+# session SSH en cours et l'hôte devient injoignable.
+- name: "ufw — autoriser les ports de service"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ ciso_firewall_ports }}"
+
+- name: "ufw — politique par défaut"
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: "ufw — activé"
+  community.general.ufw:
+    state: enabled

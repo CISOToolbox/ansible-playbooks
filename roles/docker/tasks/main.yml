@@ -1,0 +1,61 @@
+---
+# Docker CE depuis le dépôt officiel, pas depuis les paquets Ubuntu :
+# docker.io est en retard et ne fournit pas le plugin `compose` v2, dont
+# la syntaxe `docker compose` (sans tiret) est utilisée partout ici.
+
+- name: "Clé du dépôt Docker"
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: "Dépôt Docker"
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+
+- name: "Docker CE + plugin compose"
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: "Service docker actif"
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: "L'utilisateur de déploiement pilote docker"
+  ansible.builtin.user:
+    name: "{{ ciso_deploy_user }}"
+    groups: docker
+    append: true
+
+- name: "Vérifier que compose v2 répond"
+  ansible.builtin.command: docker compose version
+  register: _compose_v
+  changed_when: false
+
+- name: "Version de compose"
+  ansible.builtin.debug:
+    msg: "{{ _compose_v.stdout }}"
+
+# Les images client sont privées : sans authentification, `compose pull`
+# échoue sur elles seules et laisse la stack à moitié à jour.
+- name: "Authentification au registre (images client privées)"
+  community.docker.docker_login:
+    registry_url: "{{ ciso_registry }}"
+    username: "{{ ciso_registry_user }}"
+    password: "{{ vault_registry_password }}"
+  when: ciso_client_images | length > 0 and ciso_registry_user | length > 0
+  no_log: true

@@ -1,0 +1,6 @@
+---
+collections:
+  - name: community.docker      # docker_compose_v2, docker_login
+    version: ">=3.10.0"
+  - name: community.general     # ufw
+    version: ">=9.0.0"
