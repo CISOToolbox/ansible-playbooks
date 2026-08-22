@@ -39,8 +39,12 @@ soumis aux bits de permission comme n'importe quel utilisateur. Un
 `privkey.pem` en `0600` pour un autre compte — ce que produisent certbot et
 la plupart des PKI — fait boucler nginx sur `cannot load certificate key ...
 Permission denied`. Le rendre propriétaire du fichier suffit, sans l'exposer
-aux autres comptes de l'hôte. Pour la même raison, le répertoire de
-déploiement est en `0751` : traversable, non listable.
+aux autres comptes de l'hôte.
+
+Seuls les droits du répertoire monté et des fichiers qu'il contient comptent :
+un montage bind résout son chemin côté hôte au moment du montage, et le
+processus du conteneur ne traverse que son propre arbre. Le mode du
+répertoire de déploiement ne joue donc aucun rôle ici.
 
 ## Les trois playbooks
 
