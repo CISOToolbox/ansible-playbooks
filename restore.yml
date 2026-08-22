@@ -1,0 +1,166 @@
+---
+# Reprise après perte de l'hôte (FEAT-29).
+#
+# Reconstruit la suite sur un hôte NEUF et y restaure une sauvegarde
+# désignée, depuis le dépôt hors site. Ne suppose aucun accès à l'ancienne
+# machine : la passphrase du dépôt et les identifiants S3 suffisent.
+#
+#   ansible-playbook restore.yml --limit <hôte> \
+#     -e restore_repo=2 -e restore_target=latest
+#
+#   ansible-playbook restore.yml --limit <hôte> \
+#     -e restore_repo=2 -e '{"restore_target": "2026-08-22 20:00:00+00"}'
+#
+#   ansible-playbook restore.yml --limit <hôte> \
+#     -e restore_repo=2 -e restore_modules="pilot,risk"
+#
+# ⚠ Une cible horodatée EXIGE la forme JSON ci-dessus. En `-e clé=valeur`,
+#   Ansible découpe sur les espaces : « 2026-08-22 20:00:00+00 » devient
+#   « 2026-08-22 » et vous restaurez à MINUIT sans aucun avertissement,
+#   perdant les vingt heures que vous vouliez garder. Une assertion refuse
+#   désormais une date sans heure, précisément pour rendre ce piège bruyant.
+#
+# `restore_target` accepte « latest », un instant, ou un libellé de
+# sauvegarde (`pgbackrest info` les liste).
+#
+# ⚠ ÉCRASE les données des modules restaurés. Le playbook exige une
+# confirmation explicite — un playbook de reprise se lance dans l'urgence,
+# c'est exactement le moment où l'on se trompe d'hôte.
+- name: "CISO Toolbox — restauration"
+  hosts: ciso
+  become: true
+  gather_facts: true
+
+  vars:
+    restore_repo: 2
+    restore_target: "latest"
+    restore_modules: ""
+    restore_confirm: ""
+
+  pre_tasks:
+    - name: "Exiger une confirmation explicite"
+      ansible.builtin.assert:
+        that: restore_confirm == inventory_hostname
+        fail_msg: >-
+          Cette opération ÉCRASE les bases de « {{ inventory_hostname }} ».
+          Relancez avec -e restore_confirm={{ inventory_hostname }} pour
+          confirmer que c'est bien l'hôte visé.
+
+    # Une date nue est presque toujours le symptôme d'un « -e clé=valeur »
+    # découpé sur l'espace, pas une intention. Restaurer à minuit quand on
+    # visait 20 h ne se remarque qu'après coup, quand les données manquantes
+    # sont cherchées — d'où ce refus, plutôt qu'un défaut silencieux.
+    - name: "Refuser une cible horodatée ambiguë"
+      ansible.builtin.assert:
+        that: restore_target is not match('^\d{4}-\d{2}-\d{2}$')
+        fail_msg: >-
+          restore_target vaut « {{ restore_target }} » — une date sans heure.
+          Si vous avez passé « -e restore_target=… » avec un espace, Ansible
+          l'a tronquée et la restauration viserait MINUIT. Utilisez la forme
+          JSON : -e '{"restore_target": "{{ restore_target }} 00:00:00+00"}',
+          en indiquant l'heure voulue.
+
+    - name: "Modules à restaurer"
+      ansible.builtin.set_fact:
+        _mods: >-
+          {{ (restore_modules | length > 0)
+             | ternary(restore_modules.split(','), ciso_backup_expect_stanzas) }}
+
+    - name: "Ce qui va être fait"
+      ansible.builtin.debug:
+        msg: >-
+          Restauration depuis le dépôt {{ restore_repo }}
+          (cible « {{ restore_target }} ») sur {{ inventory_hostname }},
+          modules : {{ _mods | join(', ') }}.
+
+  roles:
+    # Installe la suite si elle n'est pas là, converge si elle l'est. Les
+    # bases démarrent vides sur un hôte neuf — c'est attendu, la restauration
+    # les remplit ensuite.
+    - { role: ciso_stack, tags: [stack] }
+
+  post_tasks:
+    # L'ordre compte. Restaurer sous une base en service corromprait le
+    # répertoire de données : PostgreSQL écrit pendant que pgBackRest
+    # remplace les fichiers sous ses pieds.
+    - name: "Arrêter les applicatifs et les bases visées"
+      ansible.builtin.command:
+        cmd: "docker compose stop {{ item }}-app {{ item }}-db"
+        chdir: "{{ ciso_deploy_dir }}"
+      loop: "{{ _mods }}"
+      changed_when: true
+
+    # --delta compare les fichiers plutôt que de tout retélécharger : sur un
+    # hôte neuf il n'y a rien à comparer, mais sur une reprise partielle il
+    # évite de rapatrier des gigaoctets déjà présents.
+    - name: "Restaurer chaque base"
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', 'run', '--rm', '--entrypoint', 'pgbackrest',
+              'backup-agent', '--stanza=' ~ item, '--repo=' ~ restore_repo,
+              '--pg1-path=/pg/' ~ item, '--delta']
+             + (restore_target == 'latest') | ternary(
+                 [],
+                 (restore_target is match('^\\d{4}-\\d{2}-\\d{2}'))
+                 | ternary(['--type=time', '--target=' ~ restore_target,
+                            '--target-action=promote'],
+                           ['--set=' ~ restore_target]))
+             + ['restore'] }}
+        chdir: "{{ ciso_deploy_dir }}"
+      loop: "{{ _mods }}"
+      changed_when: true
+
+    - name: "Redémarrer les bases"
+      ansible.builtin.command:
+        cmd: "docker compose start {{ item }}-db"
+        chdir: "{{ ciso_deploy_dir }}"
+      loop: "{{ _mods }}"
+      changed_when: true
+
+    # Une restauration à un instant antérieur à une migration laisse un
+    # schéma en retard sur le code. Les modules appliquent Alembic à leur
+    # démarrage : les relancer APRÈS les bases suffit, mais il faut vérifier
+    # que ça s'est bien passé — d'où la trace ci-dessous.
+    - name: "Redémarrer les applicatifs"
+      ansible.builtin.command:
+        cmd: "docker compose start {{ item }}-app"
+        chdir: "{{ ciso_deploy_dir }}"
+      loop: "{{ _mods }}"
+      changed_when: true
+
+    - name: "Attendre que les services soient sains"
+      ansible.builtin.shell:
+        cmd: >-
+          docker compose ps --format '{% raw %}{{.Service}} {{.Health}}{% endraw %}'
+          | grep -- '-app ' | grep -cv healthy || true
+        chdir: "{{ ciso_deploy_dir }}"
+      register: _unhealthy
+      until: _unhealthy.stdout | trim == "0"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: "Révision de schéma après restauration"
+      ansible.builtin.command:
+        cmd: >-
+          docker compose exec -T {{ item }}-db
+          psql -U {{ item }} -d {{ item }} -tAc
+          "SELECT version_num FROM alembic_version"
+        chdir: "{{ ciso_deploy_dir }}"
+      loop: "{{ _mods }}"
+      register: _revs
+      changed_when: false
+      failed_when: false
+
+    - name: "État restauré"
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item }} : schéma {{ item.stdout | default('?') | trim }}
+          {{ '— ÉCHEC de lecture, base non restaurée ?' if item.rc != 0 else '' }}
+      loop: "{{ _revs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "Contrôle des sauvegardes"
+      ansible.builtin.include_role:
+        name: backup_verify

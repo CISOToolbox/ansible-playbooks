@@ -186,6 +186,33 @@
     - _suite_tree.stat.exists or not ansible_check_mode
   register: _client_images
 
+# La surcharge S3 vient de la release au même titre que le compose : c'est
+# elle qui définit repo2 pour les dix bases et pour l'agent. Copiée
+# systématiquement — inerte tant que COMPOSE_FILE ne la référence pas.
+- name: "docker-compose.s3.yml de la release"
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ciso_deploy_dir }}/suite/docker-compose.s3.yml"
+    dest: "{{ ciso_deploy_dir }}/docker-compose.s3.yml"
+    owner: "{{ ciso_deploy_user }}"
+    mode: "0640"
+  when: _suite_tree.stat.exists or not ansible_check_mode
+  failed_when: false      # absente des releases antérieures à FEAT-29
+
+- name: "Configuration S3 complète ?"
+  ansible.builtin.assert:
+    that:
+      - ciso_backup_s3.bucket is defined
+      - ciso_backup_s3.endpoint is defined
+      - ciso_backup_s3_secret.key is defined
+      - ciso_backup_s3_secret.key_secret is defined
+    fail_msg: >-
+      ciso_backup_s3 est renseigné mais incomplet. Il faut au minimum
+      bucket + endpoint, et dans le vault ciso_backup_s3_secret.key et
+      .key_secret. Une configuration partielle empêcherait la stack de
+      démarrer : pgBackRest refuse une variable vide.
+  when: ciso_backup_s3 | default({}) | length > 0
+
 - name: "nginx.conf de la release"
   ansible.builtin.copy:
     remote_src: true

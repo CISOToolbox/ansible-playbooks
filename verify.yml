@@ -37,6 +37,48 @@
           {{ _http.results | rejectattr('status', 'in', [200, 302, 401])
              | map(attribute='item') | list | default('aucun', true) }}
 
+    # Le dépôt hors site est celui dont la défaillance est SILENCIEUSE :
+    # identifiants expirés, bucket déplacé, rétention imposée par
+    # l'hébergeur. Le dépôt local, lui, se remarque tout de suite. « Locale
+    # fraîche, hors site en retard » est donc le mode de panne à détecter.
+    - name: "Fraîcheur du dépôt hors site"
+      ansible.builtin.shell:
+        cmd: >-
+          docker compose exec -T backup-agent python3 -c "
+          import json,subprocess,time,sys;
+          mods='{{ ciso_backup_expect_stanzas | join(' ') }}'.split();
+          out=[];
+          [out.append((m, max([b['timestamp']['stop'] for r in
+            json.loads(subprocess.run(['pgbackrest','--stanza='+m,'--repo=2','info','--output=json'],
+            capture_output=True,text=True).stdout or '[]') for b in r['backup']] or [0])))
+            for m in mods];
+          now=time.time();
+          print('\n'.join(f'{m} {int((now-t)/86400) if t else -1}' for m,t in out))"
+        chdir: "{{ ciso_deploy_dir }}"
+      register: _s3_age
+      changed_when: false
+      failed_when: false
+      when: ciso_backup_s3 | default({}) | length > 0
+
+    - name: "Dépôts hors site en retard"
+      ansible.builtin.assert:
+        that: >-
+          _s3_age.stdout_lines
+          | map('regex_replace', '^\S+ ', '') | map('int')
+          | select('>', ciso_backup_s3_max_age_days | default(3))
+          | list | length == 0
+        fail_msg: >-
+          Sauvegarde hors site en retard (seuil
+          {{ ciso_backup_s3_max_age_days | default(3) }} jours) :
+          {{ _s3_age.stdout_lines | join(' | ') }}.
+          Un « -1 » signale une stanza sans AUCUNE sauvegarde sur le dépôt
+          externe — la protection contre la perte de l'hôte n'existe pas.
+        success_msg: >-
+          Dépôt hors site à jour : {{ _s3_age.stdout_lines | join(' | ') }}
+      when:
+        - ciso_backup_s3 | default({}) | length > 0
+        - _s3_age.stdout | default('') | trim | length > 0
+
     - name: "Contrôle des sauvegardes"
       ansible.builtin.include_role:
         name: backup_verify

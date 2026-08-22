@@ -95,3 +95,30 @@ ciso_env:
 # Sans effet si un Docker opérationnel est déjà présent : il n'est jamais
 # remplacé, les deux paquets étant en conflit.
 ciso_docker_source: "distro"
+
+# ─────────────────────────────────────────────────────────────────────────
+# Sauvegarde externalisée vers un stockage objet S3 (FEAT-29). FACULTATIF.
+# ─────────────────────────────────────────────────────────────────────────
+# Le dépôt pgBackRest vit dans un volume Docker, sur le MÊME hôte et le même
+# disque que les bases qu'il protège. Cela couvre la panne logique, pas la
+# perte de l'hôte : disque mort, VM détruite, rançongiciel — bases et
+# sauvegardes disparaissent alors ensemble.
+#
+# Dictionnaire vide ⇒ aucune externalisation, comportement inchangé. Les
+# identifiants et la passphrase vont dans le vault (ciso_backup_s3_secret),
+# jamais ici.
+ciso_backup_s3: {}
+#   bucket: "mes-sauvegardes-ciso"
+#   endpoint: "s3.fr-par.scw.cloud"
+#   region: "fr-par"
+#   path: "/pgbackrest"
+#   retention_full: 4
+#   test_day: "01"          # jour du test de restauration hors site
+#   uri_style: "host"       # « path » pour MinIO et compatibles
+
+# Secrets S3, à définir dans group_vars/all/vault.yml :
+#   ciso_backup_s3_secret:
+#     key: "..."
+#     key_secret: "..."
+#     cipher_pass: "..."    # facultatif ; repli sur BACKUP_CIPHER_PASS
+ciso_backup_s3_secret: {}

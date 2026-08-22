@@ -334,6 +334,120 @@ a l'interface pour ça.
 
 ---
 
+# Externaliser les sauvegardes, et restaurer
+
+Le dépôt pgBackRest vit dans un volume Docker, **sur le même hôte et le même
+disque que les bases qu'il protège**. Il couvre la panne logique — migration
+ratée, suppression accidentelle. Il ne couvre pas la perte de l'hôte : disque
+mort, VM détruite, rançongiciel. Dans ces cas, bases et sauvegardes
+disparaissent ensemble.
+
+## Activer le dépôt hors site
+
+Dans `host_vars/<hôte>.yml` :
+
+```yaml
+ciso_backup_s3:
+  bucket: "mes-sauvegardes-ciso"
+  endpoint: "s3.fr-par.scw.cloud"
+  region: "fr-par"
+  retention_full: 4
+  uri_style: "host"        # « path » pour MinIO et compatibles
+```
+
+Et dans `group_vars/all/vault.yml`, chiffré :
+
+```yaml
+ciso_backup_s3_secret:
+  key: "..."
+  key_secret: "..."
+  cipher_pass: "..."       # facultatif — repli sur BACKUP_CIPHER_PASS
+```
+
+Puis rejouer `site.yml`. Dictionnaire absent ou vide ⇒ rien ne change : le
+second dépôt n'existe pas, il n'est pas configuré à vide.
+
+**Une passphrase distincte pour le hors-site** est recommandée. Ce dépôt est
+exposé à un tiers — l'hébergeur du stockage — là où le dépôt local ne l'est
+pas. Des clés séparées permettent d'en confier une sans livrer l'autre. La
+perdre rend les sauvegardes externes irrécupérables, au même titre que
+`vault_backup_cipher` pour le dépôt local.
+
+**Restreignez les identifiants au seul bucket**, en écriture seule si votre
+hébergeur le permet : un rançongiciel qui prend l'hôte ne doit pas pouvoir
+effacer les sauvegardes. Le verrouillage d'objet côté bucket est la seule
+protection réelle contre cette classe d'attaque, et elle ne s'obtient pas
+depuis le client.
+
+## Ce que l'activation change sur l'hôte
+
+L'archivage WAL passe en **asynchrone**, et ce n'est pas un détail de
+performance. Les WAL sont poussés vers *tous* les dépôts ; sans archivage
+asynchrone, une indisponibilité de S3 empêche les autres dépôts d'avancer de
+plus d'un segment. L'`archive_command` échoue alors, les WAL s'accumulent
+dans `pg_wal`, le disque se remplit, la base s'arrête.
+
+Autrement dit : sans ce réglage, la sauvegarde hors site — censée protéger
+d'une panne d'hôte — en provoquerait une, au moment choisi par l'hébergeur du
+stockage. Le playbook l'active donc systématiquement avec le second dépôt, et
+alloue un volume de file d'attente par base.
+
+## Contrôler
+
+```bash
+ansible-playbook verify.yml --limit <hôte>
+```
+
+Vérifie la fraîcheur des **deux** dépôts séparément. « Locale fraîche, hors
+site en retard » est le mode de défaillance à guetter : le dépôt local se
+remarque tout de suite, l'externe échoue en silence — identifiants expirés,
+bucket déplacé, rétention imposée par l'hébergeur. Un `-1` signale une stanza
+sans aucune sauvegarde externe : la protection contre la perte de l'hôte
+n'existe pas.
+
+L'agent restaure par ailleurs **une base par mois depuis le dépôt externe**,
+en rotation sur les dix modules. Un dépôt hors site jamais restauré est une
+hypothèse, pas une sauvegarde.
+
+## Restaurer
+
+```bash
+# Dernière sauvegarde, tous les modules
+ansible-playbook restore.yml --limit <hôte> \
+  -e restore_repo=2 -e restore_target=latest \
+  -e restore_confirm=<hôte>
+
+# À un instant précis — FORME JSON OBLIGATOIRE, voir ci-dessous
+ansible-playbook restore.yml --limit <hôte> \
+  -e restore_repo=2 -e restore_confirm=<hôte> \
+  -e '{"restore_target": "2026-08-22 20:00:00+00"}'
+
+# Un module seulement
+ansible-playbook restore.yml --limit <hôte> \
+  -e restore_repo=2 -e restore_modules=risk -e restore_confirm=<hôte>
+```
+
+Le playbook **écrase** les bases visées, d'où `restore_confirm`, qui doit
+valoir le nom de l'hôte : une reprise se lance dans l'urgence, c'est
+exactement le moment où l'on se trompe de machine.
+
+Sur un hôte neuf, `restore.yml` installe d'abord la suite, puis restaure. Il
+ne suppose aucun accès à l'ancienne machine — la passphrase du dépôt et les
+identifiants S3 suffisent.
+
+> **Le piège des cibles horodatées.** En `-e clé=valeur`, Ansible découpe sur
+> les espaces : `-e restore_target="2026-08-22 20:00:00+00"` devient
+> `2026-08-22`, et vous restaurez à **minuit** sans le moindre avertissement,
+> perdant les vingt heures que vous vouliez garder. Utilisez la forme JSON.
+> Le playbook refuse désormais une date sans heure, pour rendre ce piège
+> bruyant plutôt que silencieux.
+
+Après une restauration à un instant antérieur à une migration, le schéma peut
+être en retard sur le code : les modules appliquent Alembic à leur démarrage,
+et le playbook affiche la révision obtenue pour chaque base.
+
+---
+
 # Déplacer un déploiement existant
 
 Les volumes Docker sont nommés d'après `COMPOSE_PROJECT_NAME`, **pas** d'après
