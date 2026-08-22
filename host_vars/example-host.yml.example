@@ -18,7 +18,12 @@ ciso_deploy_dir: "/opt/ciso-toolbox"
 # Compte de service, pas un compte personnel : le déploiement ne doit pas
 # dépendre d'une personne. Il possède l'arborescence ; les commandes docker
 # tournent en root via become, donc il n'est PAS dans le groupe docker.
-ciso_deploy_user: "ansible"
+# Compte propriétaire du déploiement. Le défaut du template est « ciso », un
+# compte de service dédié créé par le rôle common. Le pointer sur un compte
+# existant — celui avec lequel Ansible se connecte, par exemple — est un choix
+# valable pour un hôte déjà exploité : le rôle ne touche alors ni au shell, ni
+# aux groupes, ni au home d'un compte dont il n'est pas propriétaire.
+ciso_deploy_user: "ciso"
 ciso_domain: "ciso.example.com"
 ciso_http_port: 80
 ciso_https_port: 443
