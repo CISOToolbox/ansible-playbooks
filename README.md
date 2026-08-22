@@ -264,7 +264,7 @@ suite du module :
 
 ```yaml
 ciso_client_images:
-  surface: "ghcr.io/cisotoolbox/ciso-surface-bdfg:v1.0.0"
+  surface: "ghcr.io/cisotoolbox/ciso-surface-acme:v1.0.0"
 ciso_registry_user: "mon-compte"        # + vault_registry_password
 ```
 

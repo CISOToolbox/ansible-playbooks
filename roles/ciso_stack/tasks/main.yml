@@ -360,7 +360,7 @@
   delay: 10
   changed_when: false
 
-# Le contrôle qui a manqué lors de la migration BDFG : ni le contenu du
+# Le contrôle qui a manqué lors d'une migration réelle : ni le contenu du
 # compose ni l'absence d'erreur dans les logs ne prouvent qu'un conteneur
 # tourne sur la bonne image. Seule la colonne Image de `compose ps` fait foi.
 - name: "Images réellement en service"

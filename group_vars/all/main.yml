@@ -45,8 +45,8 @@ ciso_modules:
 # Images client, qui remplacent l'image de suite du module correspondant.
 # Laisser vide pour un déploiement standard. Exemple :
 #   ciso_client_images:
-#     surface: "ghcr.io/cisotoolbox/ciso-surface-bdfg:v1.0.0"
-#     access:  "ghcr.io/cisotoolbox/ciso-access-bdfg:v1.0.0"
+#     surface: "ghcr.io/cisotoolbox/ciso-surface-acme:v1.0.0"
+#     access:  "ghcr.io/cisotoolbox/ciso-access-acme:v1.0.0"
 ciso_client_images: {}
 
 # Registre : nécessaire uniquement si des images client (privées) sont
