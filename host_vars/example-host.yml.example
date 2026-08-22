@@ -1,9 +1,14 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────
-# BDF Gestion — reprise d'un déploiement existant sous Ansible.
+# EXEMPLE de fichier d'hôte — à copier sous host_vars/<nom-de-l-hote>.yml,
+# où <nom-de-l-hote> est EXACTEMENT le nom utilisé dans l'inventaire.
 #
-# Valeurs relevées sur l'hôte, pas supposées. Trois d'entre elles ne se
-# changent pas sans casse et sont commentées comme telles.
+# Ce fichier porte le suffixe .example : Ansible ne le charge pas, et il
+# n'entrera donc jamais en conflit avec votre configuration réelle lors
+# d'une mise à jour du template.
+#
+# Le cas illustré est le plus délicat : la REPRISE d'un déploiement
+# existant, où trois valeurs ne se changent pas sans casse.
 # ─────────────────────────────────────────────────────────────────────────
 
 # Déplacé hors de /home : les volumes portent le nom de PROJET, pas celui
@@ -14,7 +19,7 @@ ciso_deploy_dir: "/opt/ciso-toolbox"
 # dépendre d'une personne. Il possède l'arborescence ; les commandes docker
 # tournent en root via become, donc il n'est PAS dans le groupe docker.
 ciso_deploy_user: "ansible"
-ciso_domain: "pilot.sec.bdf-gestion.com"
+ciso_domain: "ciso.example.com"
 ciso_http_port: 80
 ciso_https_port: 443
 
@@ -33,13 +38,12 @@ ciso_modules:
   - audit
   - watch
 
-# Images client : add-ons propres à BDFG, dépôts privés.
-#   surface → smb_scan_rs (worker Rust), sans shodan ni cloud_buckets
-#   access  → connecteur RH bdf_gestion
-ciso_client_images:
-  surface: "ghcr.io/cisotoolbox/ciso-surface-bdfg:v1.0.0"
-  access: "ghcr.io/cisotoolbox/ciso-access-bdfg:v1.0.0"
-ciso_registry_user: "AirLoren"          # + vault_registry_password
+# Images client : add-ons propres à une organisation, dépôts privés.
+# Laisser vide pour un déploiement standard.
+ciso_client_images: {}
+#  surface: "ghcr.io/cisotoolbox/ciso-surface-<client>:v1.0.0"
+#  access:  "ghcr.io/cisotoolbox/ciso-access-<client>:v1.0.0"
+ciso_registry_user: ""                  # + vault_registry_password si images client
 
 # Les certificats sont déjà sur l'hôte (certs/cert.pem, certs/key.pem) et
 # correspondent aux chemins attendus par le nginx.conf de la release.
@@ -58,4 +62,4 @@ ciso_tls_mode: "existing"
 # au lieu de le remplacer crée une clé en double : YAML retient la dernière
 # et n'émet qu'un avertissement, facile à manquer dans une longue sortie.
 ciso_env:
-  COMPOSE_PROJECT_NAME: "demo-docker"
+  COMPOSE_PROJECT_NAME: "ciso"

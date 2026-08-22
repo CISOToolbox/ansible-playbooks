@@ -126,3 +126,20 @@ manifeste par un conflit de noms de conteneurs peu explicite.
 Une fois la bascule vérifiée, l'ancien répertoire ne contient plus que des
 fichiers de configuration régénérables. Le supprimer est sans effet sur les
 données.
+
+## Décrire un hôte
+
+Un déploiement se décrit dans `host_vars/<nom-de-l-hote>.yml`, où le nom doit
+correspondre **exactement** à celui de l'inventaire :
+
+```bash
+cp host_vars/example-host.yml.example host_vars/mon-serveur.yml
+```
+
+Ces fichiers vous appartiennent : le template ne livre qu'un exemple suffixé
+`.example`, qu'Ansible ne charge pas. Aucune mise à jour du template ne
+touchera donc votre configuration — et vous pouvez la versionner dans ce
+dépôt sans craindre un conflit à chaque `git pull`.
+
+Le dépôt ne contient aucun nom de client, domaine ni chemin réel : ils vivent
+dans vos fichiers d'hôte et dans votre inventaire, tous deux hors du template.
