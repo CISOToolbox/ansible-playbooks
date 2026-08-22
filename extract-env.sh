@@ -34,10 +34,17 @@ SECRET = re.compile(
 # est une remarque d'audit assurée. Non reprise.
 DROP = {"SURFACE_ALLOW_NO_AUTH"}
 
-public, secret, dropped = {}, {}, []
-for raw in src.read_text(encoding="utf-8").splitlines():
+public, secret, dropped, orphans = {}, {}, [], []
+for num, raw in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
     line = raw.strip()
-    if not line or line.startswith("#") or "=" not in line:
+    if not line or line.startswith("#"):
+        continue
+    if "=" not in line:
+        # Ligne sans « = » : presque toujours la suite d'une valeur coupée par
+        # un retour à la ligne. L'ignorer en silence tronquerait le secret
+        # sans que personne ne s'en aperçoive — c'est arrivé sur un
+        # JWT_SECRET en production. On la signale, on ne devine pas.
+        orphans.append((num, line[:12] + "…"))
         continue
     key, _, value = line.partition("=")
     key = key.strip()
@@ -63,7 +70,23 @@ print(f"vault_env.yml  : {len(secret)} clé(s) — {', '.join(sorted(secret))}")
 if dropped:
     print()
     print(f"NON reprises   : {', '.join(dropped)}")
+if orphans:
+    print()
+    print("!! LIGNES SANS « = » — valeur probablement coupée par un retour à la ligne :")
+    for num, extrait in orphans:
+        print(f"     ligne {num} : {extrait}")
+    print("   La clé qui précède est donc TRONQUÉE dans l'extraction.")
+    print("   Corrigez le .env source, ou régénérez la valeur si elle le permet.")
+    sys.exit(3)
 PY
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    # Extraction incomplète : ne pas enchaîner sur les instructions de reprise,
+    # elles donneraient l'impression que le résultat est exploitable.
+    echo
+    echo "!! Extraction INTERROMPUE — corrigez le .env source puis relancez." >&2
+    exit "$rc"
+fi
 
 cat <<'EOF'
 
