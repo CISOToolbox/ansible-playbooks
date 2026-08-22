@@ -12,7 +12,13 @@
     state: directory
     owner: "{{ ciso_deploy_user }}"
     group: "{{ ciso_deploy_user }}"
-    mode: "0750"
+    # 0751 et non 0750 : le proxy de la release tourne avec cap_drop: ALL,
+    # donc SANS DAC_OVERRIDE — son processus root est soumis aux bits de
+    # permission comme n'importe quel utilisateur et ne peut pas traverser un
+    # répertoire sans x. Le bit x pour « autres » autorise la traversée sans
+    # autoriser le listage ; les fichiers gardent leurs propres droits
+    # (.env en 0600, compose en 0640).
+    mode: "0751"
 
 - name: "Récupérer la release {{ ciso_suite_version }}"
   ansible.builtin.git:
@@ -77,6 +83,29 @@
       évalués ici. Les contrôles qui portent sur l'ÉTAT de l'hôte — volumes
       de données, stack déjà en cours d'exécution — le sont, eux.
   when: ansible_check_mode and not _suite_tree.stat.exists
+
+# Le proxy n'ayant pas DAC_OVERRIDE, il lui faut une permission explicite sur
+# la clé privée. La rendre lisible par « autres » l'exposerait à tous les
+# comptes de l'hôte ; on fait du conteneur son PROPRIÉTAIRE (root dans le
+# conteneur = root sur l'hôte, sans remappage d'espace de noms), et la
+# permission propriétaire suffit.
+#
+# S'applique aussi en mode « existing » : un privkey.pem déposé par certbot ou
+# une PKI d'entreprise arrive en 0600 pour un autre compte, et le proxy boucle
+# alors sur « cannot load certificate key ... Permission denied ».
+- name: "Certificats lisibles par le proxy durci"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ ciso_deploy_dir }}/certs", mode: "0750" }
+    - { path: "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_cert_name }}", mode: "0640" }
+    - { path: "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_key_name }}", mode: "0640" }
+  loop_control:
+    label: "{{ item.path }}"
+  notify: redémarrer le proxy
 
 - name: "docker-compose.yml de la release"
   ansible.builtin.copy:

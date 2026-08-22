@@ -32,6 +32,16 @@ ansible-playbook site.yml
 Les certificats TLS attendus sur le control node :
 `files/certs/<domaine>/fullchain.pem` et `privkey.pem`.
 
+Le playbook les met en `root:root 0640` sur l'hôte, dans un `certs/` en
+`0750`. Ce n'est pas cosmétique : le proxy de la release tourne avec
+`cap_drop: ALL`, donc **sans `DAC_OVERRIDE`**, et son processus root est
+soumis aux bits de permission comme n'importe quel utilisateur. Un
+`privkey.pem` en `0600` pour un autre compte — ce que produisent certbot et
+la plupart des PKI — fait boucler nginx sur `cannot load certificate key ...
+Permission denied`. Le rendre propriétaire du fichier suffit, sans l'exposer
+aux autres comptes de l'hôte. Pour la même raison, le répertoire de
+déploiement est en `0751` : traversable, non listable.
+
 ## Les trois playbooks
 
 | Playbook | Rôle |
