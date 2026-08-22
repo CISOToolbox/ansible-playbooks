@@ -1,11 +1,10 @@
 ---
+# Copier en inventory/hosts.yml (gitignoré : il porte adresses et accès SSH).
 all:
-  hosts:
-    ciso-prod:
-      ansible_host: 10.0.0.42
-      ansible_user: ubuntu
-      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
   children:
     ciso:
       hosts:
-        ciso-prod:
+        bdfg:                                   # → host_vars/bdfg.yml
+          ansible_host: BDFG-SRV-SEC01
+          ansible_user: admrl
+          ansible_ssh_private_key_file: ~/.ssh/id_ed25519

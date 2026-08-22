@@ -1,0 +1,52 @@
+---
+# ─────────────────────────────────────────────────────────────────────────
+# BDF Gestion — reprise d'un déploiement existant sous Ansible.
+#
+# Valeurs relevées sur l'hôte, pas supposées. Trois d'entre elles ne se
+# changent pas sans casse et sont commentées comme telles.
+# ─────────────────────────────────────────────────────────────────────────
+
+ciso_deploy_dir: "/home/admrl/projects/ciso-toolbox/demo-docker"
+ciso_deploy_user: "admrl"
+ciso_domain: "pilot.sec.bdf-gestion.com"
+ciso_http_port: 80
+ciso_https_port: 443
+
+# Version de suite déployée. Une montée se fait ICI, puis upgrade.yml.
+ciso_suite_version: "v0.9.2"
+
+# Neuf modules, audit inclus.
+ciso_modules:
+  - risk
+  - compliance
+  - vendor
+  - asset
+  - access
+  - surface
+  - appsec
+  - audit
+  - watch
+
+# Images client : add-ons propres à BDFG, dépôts privés.
+#   surface → smb_scan_rs (worker Rust), sans shodan ni cloud_buckets
+#   access  → connecteur RH bdf_gestion
+ciso_client_images:
+  surface: "ghcr.io/cisotoolbox/ciso-surface-bdfg:v1.0.0"
+  access: "ghcr.io/cisotoolbox/ciso-access-bdfg:v1.0.0"
+ciso_registry_user: "AirLoren"          # + vault_registry_password
+
+# Les certificats sont déjà sur l'hôte (certs/cert.pem, certs/key.pem) et
+# correspondent aux chemins attendus par le nginx.conf de la release.
+# Ansible vérifie leur présence sans y toucher.
+ciso_tls_mode: "existing"
+
+# ── Le .env ──────────────────────────────────────────────────────────────
+# Extrait de l'existant par extract-env.sh : AUCUNE valeur n'a été
+# régénérée. Remplacer ce bloc par le contenu de ciso_env.yml.
+#
+# COMPOSE_PROJECT_NAME est LA valeur critique : elle préfixe les volumes.
+# Une autre valeur ferait démarrer la stack sur des bases vides — le rôle
+# refuse désormais ce cas, mais ne le corrige pas à votre place.
+ciso_env:
+  COMPOSE_PROJECT_NAME: "demo-docker"
+  # … coller ici les 12 autres clés de ciso_env.yml …

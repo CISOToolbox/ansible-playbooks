@@ -52,7 +52,13 @@ ciso_registry_user: ""
 #   "provided" — les fichiers sont fournis depuis le control node
 #                (files/certs/<domaine>/fullchain.pem + privkey.pem)
 #   "selfsigned" — génération locale, pour une maquette uniquement
+#   "existing"   — déjà déposés sur l'hôte (ACME, PKI d'entreprise, reprise
+#                  d'un déploiement) : le rôle vérifie leur présence, sans y toucher
 ciso_tls_mode: "provided"
+
+# Noms des fichiers dans <deploy_dir>/certs/. Ceux du nginx.conf de la release.
+ciso_tls_cert_name: "cert.pem"
+ciso_tls_key_name: "key.pem"
 
 # Ports ouverts par ufw. 22 est indispensable, ne pas le retirer sous peine
 # de perdre l'accès à l'hôte au premier `ufw enable`.

@@ -24,15 +24,40 @@
   become_user: "{{ ciso_deploy_user }}"
   register: _suite_git
 
-- name: "Certificats TLS fournis"
+# Trois postures, parce qu'un certificat n'arrive pas toujours par le même
+# chemin : fourni depuis le nœud de contrôle, déjà déposé sur l'hôte par un
+# autre outil (ACME, PKI d'entreprise), ou auto-signé pour une maquette.
+# Les NOMS de fichiers sont variables : nginx.conf de la release attend
+# cert.pem / key.pem, mais un déploiement existant peut les nommer autrement.
+- name: "Certificats TLS fournis depuis le nœud de contrôle"
   ansible.builtin.copy:
     src: "certs/{{ ciso_domain }}/{{ item }}"
     dest: "{{ ciso_deploy_dir }}/certs/{{ item }}"
     owner: "{{ ciso_deploy_user }}"
     mode: "0640"
-  loop: [fullchain.pem, privkey.pem]
+  loop:
+    - "{{ ciso_tls_cert_name }}"
+    - "{{ ciso_tls_key_name }}"
   when: ciso_tls_mode == "provided"
   notify: redémarrer le proxy
+
+- name: "Certificats TLS déjà présents sur l'hôte"
+  ansible.builtin.stat:
+    path: "{{ ciso_deploy_dir }}/certs/{{ item }}"
+  loop:
+    - "{{ ciso_tls_cert_name }}"
+    - "{{ ciso_tls_key_name }}"
+  register: _tls_stat
+  when: ciso_tls_mode == "existing"
+
+- name: "Vérifier que les certificats existants sont bien là"
+  ansible.builtin.assert:
+    that: _tls_stat.results | map(attribute='stat.exists') | select | list | length == 2
+    fail_msg: >-
+      ciso_tls_mode=existing mais {{ ciso_deploy_dir }}/certs/ ne contient pas
+      {{ ciso_tls_cert_name }} et {{ ciso_tls_key_name }}. Le proxy refuserait
+      de démarrer — nginx échoue si ssl_certificate pointe dans le vide.
+  when: ciso_tls_mode == "existing"
 
 - name: "docker-compose.yml de la release"
   ansible.builtin.copy:
