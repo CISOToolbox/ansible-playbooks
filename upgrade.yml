@@ -10,7 +10,9 @@
 - name: "CISO Toolbox — montée de version"
   hosts: ciso
   become: true
-  gather_facts: false
+  # Collecte NÉCESSAIRE : ansible_date_time horodate les dumps. Sans elle, la
+  # toute première tâche utile échoue sur une variable indéfinie.
+  gather_facts: true
 
   pre_tasks:
     - name: "Version actuellement déployée"
@@ -23,6 +25,15 @@
     - name: "Version — de … vers …"
       ansible.builtin.debug:
         msg: "{{ _current.stdout | default('inconnue', true) }} → {{ ciso_suite_version }}"
+
+    # 0700 root : un dump contient l'intégralité des bases en clair.
+    - name: "Répertoire des dumps"
+      ansible.builtin.file:
+        path: "{{ ciso_deploy_dir }}/dumps"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
 
     # Une migration Alembic ne se rejoue pas à l'envers. Sans dump, un
     # échec en cours de mise à jour ne laisse aucun retour en arrière.

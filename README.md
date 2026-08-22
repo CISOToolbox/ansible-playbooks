@@ -14,45 +14,108 @@ compatibilité. Monter de version, c'est changer cette variable et rejouer.
 Corollaire : ne mettez pas `main` dans `ciso_suite_version`. Vous déploieriez
 une composition que personne n'a validée.
 
-## Mise en route
+## Les trois playbooks
+
+| Playbook | Quand | Ce qu'il ajoute |
+|---|---|---|
+| `site.yml` | installation, et toute convergence ensuite | rien de plus : idempotent, rejouable à volonté |
+| `upgrade.yml` | changement de `ciso_suite_version` | dump préalable de chaque base, contrôle des migrations et des erreurs au démarrage |
+| `verify.yml` | à tout moment | contrôles seuls, n'écrit rien |
+
+`upgrade.yml` fait tout ce que fait `site.yml`. La différence tient aux
+garde-fous : il **refuse de tourner** si un dump est vide ou manquant, parce
+qu'une migration Alembic ne se rejoue pas à l'envers.
+
+---
+
+# Déployer depuis zéro
+
+## 1. Le nœud de contrôle
+
+```bash
+git clone <ce dépôt> && cd ansible-playbooks
+ansible-galaxy collection install -r requirements.yml
+```
+
+## 2. L'inventaire
 
 ```bash
 cp inventory/hosts.yml.example inventory/hosts.yml
-cp group_vars/all/vault.yml.example group_vars/all/vault.yml
-
-# Générer les secrets (openssl rand -hex 32 pour chacun), puis chiffrer
-ansible-vault encrypt group_vars/all/vault.yml
-echo "monmotdepasse" > .vault_pass && chmod 600 .vault_pass
-
-ansible-galaxy collection install -r requirements.yml
-ansible-playbook site.yml --syntax-check     # toujours avant la première fois
-ansible-playbook site.yml
 ```
 
-Les certificats TLS attendus sur le control node :
-`files/certs/<domaine>/fullchain.pem` et `privkey.pem`.
+Le nom donné à l'hôte dans ce fichier est structurant : `host_vars/<nom>.yml`
+doit porter **exactement** le même. Un fichier dont le nom ne correspond pas
+n'est jamais chargé, en silence.
 
-Le playbook les met en `root:root 0640` sur l'hôte, dans un `certs/` en
-`0750`. Ce n'est pas cosmétique : le proxy de la release tourne avec
-`cap_drop: ALL`, donc **sans `DAC_OVERRIDE`**, et son processus root est
-soumis aux bits de permission comme n'importe quel utilisateur. Un
-`privkey.pem` en `0600` pour un autre compte — ce que produisent certbot et
-la plupart des PKI — fait boucler nginx sur `cannot load certificate key ...
-Permission denied`. Le rendre propriétaire du fichier suffit, sans l'exposer
-aux autres comptes de l'hôte.
+## 3. Les secrets
 
-Seuls les droits du répertoire monté et des fichiers qu'il contient comptent :
-un montage bind résout son chemin côté hôte au moment du montage, et le
-processus du conteneur ne traverse que son propre arbre. Le mode du
-répertoire de déploiement ne joue donc aucun rôle ici.
+```bash
+cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+```
 
-## (Ré)installer les certificats
+Générez chaque valeur avec `openssl rand -hex 32`, puis chiffrez :
 
-Trois postures, selon la façon dont le certificat arrive.
+```bash
+ansible-vault encrypt group_vars/all/vault.yml
+echo "<mot de passe du vault>" > .vault_pass && chmod 600 .vault_pass
+```
 
-**`provided`** — les fichiers vivent sur le nœud de contrôle et le playbook
-les dépose. C'est le mode à choisir pour un déploiement reproductible depuis
-zéro :
+La forme **répertoire** (`group_vars/all/`) est obligatoire. Un
+`group_vars/all.vault.yml` ne serait jamais chargé : Ansible associe un
+fichier au groupe portant exactement son nom, et « all.vault » n'est pas
+« all ».
+
+## 4. L'hôte
+
+```bash
+cp host_vars/example-host.yml.example host_vars/<nom-de-l-hôte>.yml
+```
+
+Ces fichiers vous appartiennent — le template ne livre qu'un `.example`,
+qu'Ansible ne charge pas. Aucune mise à jour du template ne touchera votre
+configuration, et vous pouvez la versionner ici sans conflit à chaque `git
+pull`. À renseigner au minimum : `ciso_domain`, `ciso_deploy_dir`,
+`ciso_deploy_user`, `ciso_tls_mode`, et le bloc `ciso_env`.
+
+Ne mettez pas `main` dans `ciso_suite_version` : vous déploieriez une
+composition que personne n'a validée. Un tag de suite décrit une combinaison
+de modules testée ensemble — c'est le manifeste de compatibilité.
+
+## 5. Les certificats
+
+Voir *Installer et renouveler les certificats* ci-dessous. Le proxy ne
+démarre pas sans, quel que soit le mode.
+
+## 6. Déployer
+
+```bash
+ansible-playbook site.yml --syntax-check       # toujours avant la première fois
+ansible-playbook site.yml --limit <hôte> --check --diff
+ansible-playbook site.yml --limit <hôte>
+```
+
+Le mode `--check` ne couvre pas tout : le clone de la release n'y a pas lieu,
+donc la copie du compose et la validation `docker compose config` sont
+sautées — le playbook le dit explicitement. En revanche les contrôles d'état
+(volumes de données, conteneurs existants) s'exécutent vraiment, et ce sont
+les plus utiles avant un premier démarrage.
+
+## 7. Contrôler
+
+```bash
+ansible-playbook verify.yml --limit <hôte>
+```
+
+---
+
+# Installer et renouveler les certificats
+
+Trois postures, selon la façon dont le certificat arrive. Le mode se choisit
+avec `ciso_tls_mode`, et une valeur inconnue est rejetée explicitement.
+
+## `provided` — fournis depuis le nœud de contrôle
+
+Le mode d'un déploiement reproductible depuis zéro.
 
 ```bash
 mkdir -p files/certs/<domaine>
@@ -62,41 +125,106 @@ cp privkey.pem   files/certs/<domaine>/key.pem
 
 Les noms de destination sont ceux de `ciso_tls_cert_name` /
 `ciso_tls_key_name` (`cert.pem` / `key.pem` par défaut) : le fichier source
-doit porter le même nom que sa destination.
+doit porter le même nom que sa destination, et le répertoire correspondre
+exactement à `ciso_domain`.
 
-`files/certs/` est exclu par le `.gitignore` du dépôt. Pour versionner malgré
-tout la clé — utile quand plusieurs personnes déploient — chiffrez-la, le
-module `copy` déchiffre les sources vaultées de façon transparente :
+`files/certs/` est exclu par le `.gitignore`. Pour versionner la clé malgré
+tout — utile quand plusieurs personnes déploient — chiffrez-la : le module
+`copy` déchiffre les sources vaultées de façon transparente.
 
 ```bash
 ansible-vault encrypt files/certs/<domaine>/key.pem
 ```
 
-**`existing`** — les fichiers sont déjà sur l'hôte (certbot, PKI d'entreprise).
-Le playbook vérifie leur présence et corrige leurs droits, sans les écraser.
+## `existing` — déjà sur l'hôte
 
-**`selfsigned`** — génère un certificat auto-signé sur l'hôte, avec un SAN
-couvrant le domaine et ses sous-domaines. **Maquettes uniquement** : aucun
-navigateur ne le validera. Régénérer suppose de supprimer le certificat
-existant, la tâche étant idempotente par `creates`.
+Pour un certificat posé par certbot ou une PKI d'entreprise. Le playbook
+vérifie sa présence et corrige ses droits, sans jamais l'écraser — le
+renouvellement reste piloté par l'outil qui l'a émis.
 
-Dans tous les cas, rejouer les certificats seuls — sans toucher au reste :
+## `selfsigned` — maquette uniquement
+
+Génère un certificat auto-signé sur l'hôte, avec un SAN couvrant le domaine
+et ses sous-domaines. Aucun navigateur ne le validera. La tâche est
+idempotente par `creates` : pour en régénérer un, supprimez d'abord
+l'existant.
+
+## Rejouer les certificats seuls
 
 ```bash
 ansible-playbook site.yml --tags certs --limit <hôte>
 ```
 
-Le proxy est recréé automatiquement si un fichier a changé. Une simple
-recopie ne suffirait pas : `nginx.conf` est monté comme fichier unique, donc
-attaché à son inode.
+Copie, droits, et recréation du proxy si un fichier a changé — sans toucher
+au reste de la stack. C'est la commande de chaque renouvellement.
 
-## Les trois playbooks
+Le playbook place les certificats en `root:root 0640`, dans un `certs/` en
+`0750`. Ce n'est pas cosmétique : le proxy de la release tourne avec
+`cap_drop: ALL`, donc **sans `DAC_OVERRIDE`**, et son processus root est
+soumis aux bits de permission comme n'importe quel utilisateur. Un
+`privkey.pem` en `0600` pour un autre compte — ce que produisent certbot et
+la plupart des PKI — fait boucler nginx sur `cannot load certificate key ...
+Permission denied`, proxy en `Restarting` et suite injoignable. Le rendre
+propriétaire du fichier suffit, sans l'exposer aux autres comptes de l'hôte.
 
-| Playbook | Rôle |
-|---|---|
-| `site.yml` | Installation et convergence. Idempotent, rejouable. |
-| `upgrade.yml` | Montée vers une autre release, avec dump préalable et contrôle des migrations. |
-| `verify.yml` | Contrôles seuls, n'écrit rien. |
+Seuls les droits du répertoire monté et de son contenu comptent : un montage
+bind résout son chemin côté hôte au moment du montage, et le processus du
+conteneur ne traverse que son propre arbre. Le mode du répertoire de
+déploiement ne joue aucun rôle ici.
+
+---
+
+# Monter un déploiement existant de version
+
+## 1. Choisir la cible
+
+Changez `ciso_suite_version` dans `group_vars/all/main.yml` — ou dans le
+`host_vars` de l'hôte, pour ne monter qu'un environnement.
+
+## 2. Monter
+
+```bash
+ansible-playbook upgrade.yml --limit <hôte>
+```
+
+Ce que le playbook fait, dans l'ordre :
+
+1. affiche la version actuellement déployée et la cible ;
+2. **dump chaque base** dans `<déploiement>/dumps/`, en `0700 root` ;
+3. **refuse de continuer** si un dump est vide ou manquant — un dump vide
+   signale une base injoignable, et sans sauvegarde une migration ratée est
+   sans retour ;
+4. déploie la nouvelle release (tout ce que fait `site.yml`) ;
+5. relit les logs pour tracer les **migrations Alembic** appliquées au
+   démarrage ;
+6. compte les `traceback` / `critical` / `refusing to start` apparus depuis
+   la mise à jour et alerte s'il y en a ;
+7. contrôle les sauvegardes.
+
+## 3. Vérifier
+
+```bash
+ansible-playbook verify.yml --limit <hôte>
+```
+
+## Revenir en arrière
+
+Il n'y a **pas** de retour arrière automatique, et c'est délibéré : les
+migrations Alembic sont irréversibles. Remettre l'ancien
+`ciso_suite_version` ferait tourner du code ancien sur un schéma avancé.
+
+Le retour se fait donc par restauration : remonter l'ancienne version, puis
+recharger les dumps de l'étape 2. C'est la raison d'être du garde-fou qui
+refuse de démarrer sans eux.
+
+Avant une montée qui vous inquiète, vérifiez si des migrations sont même en
+jeu — si les images sont identiques, il n'y en a aucune :
+
+```bash
+ansible-playbook site.yml --tags stack --check --diff --limit <hôte>
+```
+
+---
 
 ## Deux secrets à traiter à part
 
@@ -204,7 +332,9 @@ L'obtention des certificats (ni ACME ni PKI interne — ils sont fournis), la
 supervision, et la restauration. La restauration se pilote depuis Pilot, qui
 a l'interface pour ça.
 
-## Déplacer un déploiement existant
+---
+
+# Déplacer un déploiement existant
 
 Les volumes Docker sont nommés d'après `COMPOSE_PROJECT_NAME`, **pas** d'après
 le répertoire : déplacer un déploiement ne touche pas aux données, tant que le
@@ -248,19 +378,7 @@ systemctl --user list-unit-files --state=enabled
 loginctl show-user <compte> -p Linger    # Linger=yes ⇒ démarrent sans session
 ```
 
-## Décrire un hôte
-
-Un déploiement se décrit dans `host_vars/<nom-de-l-hote>.yml`, où le nom doit
-correspondre **exactement** à celui de l'inventaire :
-
-```bash
-cp host_vars/example-host.yml.example host_vars/mon-serveur.yml
-```
-
-Ces fichiers vous appartiennent : le template ne livre qu'un exemple suffixé
-`.example`, qu'Ansible ne charge pas. Aucune mise à jour du template ne
-touchera donc votre configuration — et vous pouvez la versionner dans ce
-dépôt sans craindre un conflit à chaque `git pull`.
+---
 
 Le dépôt ne contient aucun nom de client, domaine ni chemin réel : ils vivent
 dans vos fichiers d'hôte et dans votre inventaire, tous deux hors du template.

@@ -21,7 +21,10 @@
     - name: "Réponse HTTP de chaque module par la bordure"
       ansible.builtin.uri:
         url: "https://{{ ciso_domain }}/{{ item }}/"
-        validate_certs: "{{ ciso_tls_mode == 'provided' }}"
+        # Un certificat « existing » vient d'ACME ou d'une PKI d'entreprise :
+        # il est aussi valide qu'un « provided ». Seul l'auto-signé échoue à
+        # la validation, et lui seul doit y échapper.
+        validate_certs: "{{ ciso_tls_mode != 'selfsigned' }}"
         status_code: [200, 302, 401]
       loop: "{{ ciso_modules }}"
       register: _http
