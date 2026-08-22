@@ -1,7 +1,19 @@
 ---
-# Docker CE depuis le dépôt officiel, pas depuis les paquets Ubuntu :
-# docker.io est en retard et ne fournit pas le plugin `compose` v2, dont
-# la syntaxe `docker compose` (sans tiret) est utilisée partout ici.
+# Deux sources possibles, pilotées par `ciso_docker_source` :
+#
+#   distro (défaut) — docker.io + docker-compose-v2 + docker-buildx, paquets
+#     Ubuntu. Sur 24.04 ils sont à jour (docker.io 29.x, compose 2.40.x) :
+#     l'argument historique « la distribution est en retard et n'a pas
+#     compose v2 » ne vaut plus. Ils sont signés par Ubuntu, suivis par
+#     unattended-upgrades, et n'ajoutent aucun dépôt tiers.
+#
+#   docker-ce — dépôt officiel Docker Inc. À choisir si une version amont
+#     précise est requise. Ajoute une clé et un dépôt tiers à la chaîne
+#     d'approvisionnement de l'hôte.
+#
+# Dans les deux cas, un Docker déjà opérationnel n'est jamais remplacé :
+# docker-ce et docker.io sont en conflit, et basculer de l'un à l'autre
+# arrête les conteneurs en service.
 
 # Un hôte qui tourne déjà peut avoir Docker par un autre chemin — le paquet
 # docker.io d'Ubuntu, typiquement. Or docker-ce et docker.io sont en CONFLIT :
@@ -23,12 +35,23 @@
       conteneurs.
   when: _docker_present.rc == 0
 
+- name: "Docker par les paquets de la distribution"
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+      - docker-buildx
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: _docker_present.rc != 0 and ciso_docker_source == "distro"
+
 - name: "Clé du dépôt Docker"
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
     dest: /etc/apt/keyrings/docker.asc
     mode: "0644"
-  when: _docker_present.rc != 0
+  when: _docker_present.rc != 0 and ciso_docker_source == "docker-ce"
 
 - name: "Dépôt Docker"
   ansible.builtin.apt_repository:
@@ -38,7 +61,7 @@
       https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
     filename: docker
     state: present
-  when: _docker_present.rc != 0
+  when: _docker_present.rc != 0 and ciso_docker_source == "docker-ce"
 
 - name: "Docker CE + plugin compose"
   ansible.builtin.apt:
@@ -50,7 +73,7 @@
       - docker-compose-plugin
     state: present
     update_cache: true
-  when: _docker_present.rc != 0
+  when: _docker_present.rc != 0 and ciso_docker_source == "docker-ce"
 
 - name: "Service docker actif"
   ansible.builtin.service:

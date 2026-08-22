@@ -94,6 +94,26 @@ qui vient de la release telle quelle. Pour ne pas déployer un module, il faut
 retirer ses services du compose après copie, ce que ce template ne fait pas
 aujourd'hui : c'est une divergence assumée à porter côté client.
 
+## Le moteur Docker
+
+Par défaut, le rôle installe les paquets de la **distribution** —
+`docker.io`, `docker-compose-v2`, `docker-buildx`. Sur Ubuntu 24.04 ils sont
+à jour (Docker 29.x, compose 2.40.x), signés par Ubuntu et suivis par
+`unattended-upgrades`, sans dépôt tiers dans la chaîne d'approvisionnement de
+l'hôte.
+
+Le dépôt officiel Docker Inc. reste disponible si une version amont précise
+est nécessaire :
+
+```yaml
+ciso_docker_source: "docker-ce"
+```
+
+Sur un hôte où `docker compose version` répond déjà, **rien n'est installé**,
+quelle que soit la source : `docker-ce` et `docker.io` sont en conflit, et
+basculer de l'un à l'autre désinstallerait le moteur en place et arrêterait
+les conteneurs en service.
+
 ## Ce qui n'est pas couvert
 
 L'obtention des certificats (ni ACME ni PKI interne — ils sont fournis), la

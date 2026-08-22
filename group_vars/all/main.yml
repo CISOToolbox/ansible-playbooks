@@ -89,3 +89,9 @@ ciso_env:
   HTTPS_PORT: "{{ ciso_https_port }}"
   PILOT_MODULES: "{{ ciso_modules | join(',') }}"
   AUTH_MODE: "pilot"
+
+# Source de Docker : "distro" (docker.io + docker-compose-v2, signés par
+# Ubuntu, sans dépôt tiers) ou "docker-ce" (dépôt officiel Docker Inc.).
+# Sans effet si un Docker opérationnel est déjà présent : il n'est jamais
+# remplacé, les deux paquets étant en conflit.
+ciso_docker_source: "distro"
