@@ -34,7 +34,6 @@
           | gzip > {{ ciso_deploy_dir }}/dumps/{{ item }}-{{ ansible_date_time.date }}.sql.gz
         chdir: "{{ ciso_deploy_dir }}"
         executable: /bin/bash
-      become_user: "{{ ciso_deploy_user }}"
       loop: "{{ ciso_backup_expect_stanzas }}"
       register: _dumps
       failed_when: _dumps.rc != 0
@@ -70,7 +69,6 @@
           | grep -iE 'running upgrade|alembic' | tail -5 || true
         chdir: "{{ ciso_deploy_dir }}"
         executable: /bin/bash
-      become_user: "{{ ciso_deploy_user }}"
       loop: "{{ ciso_backup_expect_stanzas }}"
       register: _migrations
       changed_when: false
@@ -90,7 +88,6 @@
           | grep -icE 'traceback|critical|refusing to start' || true
         chdir: "{{ ciso_deploy_dir }}"
         executable: /bin/bash
-      become_user: "{{ ciso_deploy_user }}"
       register: _errors
       changed_when: false
 

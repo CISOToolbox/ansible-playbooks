@@ -8,7 +8,6 @@
   ansible.builtin.command:
     cmd: docker compose exec -T backup-agent pgbackrest --stanza={{ item }} info --output=json
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
   loop: "{{ ciso_backup_expect_stanzas }}"
   register: _stanzas
   changed_when: false

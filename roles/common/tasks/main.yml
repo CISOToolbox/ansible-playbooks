@@ -24,12 +24,14 @@
     update_cache: true
     cache_valid_time: 3600
 
+# `state: present` sans autre attribut : si le compte existe déjà — cas d'un
+# compte de service géré ailleurs — on ne touche NI à son shell, NI à ses
+# groupes, NI à son home. Les imposer ici reviendrait à reconfigurer par
+# effet de bord un compte dont ce rôle n'est pas propriétaire.
 - name: "Utilisateur de déploiement"
   ansible.builtin.user:
     name: "{{ ciso_deploy_user }}"
-    system: false
-    shell: /bin/bash
-    create_home: true
+    state: present
 
 - name: "Mises à jour de sécurité automatiques"
   ansible.builtin.service:

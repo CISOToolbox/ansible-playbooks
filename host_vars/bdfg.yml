@@ -10,7 +10,10 @@
 # du répertoire, donc les données suivent. Séquence de bascule dans le
 # README, section « Déplacer un déploiement existant ».
 ciso_deploy_dir: "/opt/ciso-toolbox"
-ciso_deploy_user: "admrl"
+# Compte de service, pas un compte personnel : le déploiement ne doit pas
+# dépendre d'une personne. Il possède l'arborescence ; les commandes docker
+# tournent en root via become, donc il n'est PAS dans le groupe docker.
+ciso_deploy_user: "ansible"
 ciso_domain: "pilot.sec.bdf-gestion.com"
 ciso_http_port: 80
 ciso_https_port: 443

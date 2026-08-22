@@ -107,7 +107,6 @@
   ansible.builtin.command:
     cmd: docker compose config -q
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
   changed_when: false
 
 # Compose préfixe les volumes par le nom de projet. Se tromper de nom ne
@@ -118,7 +117,6 @@
 - name: "Volumes de données déjà présents sur l'hôte"
   ansible.builtin.command:
     cmd: docker volume ls --format '{% raw %}{{.Name}}{% endraw %}'
-  become_user: "{{ ciso_deploy_user }}"
   register: _volumes
   changed_when: false
 
@@ -159,7 +157,6 @@
     cmd: >-
       docker inspect ciso-pilot
       --format '{% raw %}{{ index .Config.Labels "com.docker.compose.project.working_dir" }}{% endraw %}'
-  become_user: "{{ ciso_deploy_user }}"
   register: _running_dir
   changed_when: false
   failed_when: false
@@ -180,14 +177,12 @@
   ansible.builtin.command:
     cmd: docker compose pull
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
   changed_when: true
 
 - name: "Démarrer la stack"
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
   changed_when: true
 
 - name: "Attendre que les services soient sains"
@@ -196,7 +191,6 @@
       docker compose ps --format '{% raw %}{{.Service}} {{.Health}}{% endraw %}'
       | grep -- '-app ' | grep -cv healthy || true
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
   register: _unhealthy
   until: _unhealthy.stdout | trim == "0"
   retries: 30
@@ -210,7 +204,6 @@
   ansible.builtin.command:
     cmd: docker compose ps --format '{% raw %}{{.Service}}\t{{.Image}}{% endraw %}'
     chdir: "{{ ciso_deploy_dir }}"
-  become_user: "{{ ciso_deploy_user }}"
   register: _running_images
   changed_when: false
 

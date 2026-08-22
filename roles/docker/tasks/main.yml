@@ -35,11 +35,10 @@
     state: started
     enabled: true
 
-- name: "L'utilisateur de déploiement pilote docker"
-  ansible.builtin.user:
-    name: "{{ ciso_deploy_user }}"
-    groups: docker
-    append: true
+# Volontairement PAS d'ajout au groupe docker : y appartenir équivaut à un
+# accès root permanent sur l'hôte, et ce compte est celui qui reçoit les
+# connexions SSH. Les commandes docker tournent en root via become, ce qui
+# donne le même résultat sans privilège permanent.
 
 - name: "Vérifier que compose v2 répond"
   ansible.builtin.command: docker compose version
