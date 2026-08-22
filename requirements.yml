@@ -1,6 +1,17 @@
 ---
+# Bornes HAUTES volontaires. Sans elles, ansible-galaxy installe la dernière
+# version publiée, qui peut exiger un ansible-core plus récent que celui du
+# nœud de contrôle — le symptôme est un avertissement « does not support
+# Ansible version X » suivi d'échecs à l'exécution, pas d'un refus d'install.
+#
+# Relevé dans meta/runtime.yml de chaque collection :
+#   community.docker   4.x → core >=2.15    5.x → core >=2.17
+#   community.general  11.x → core >=2.16    12.x → core >=2.17
+#
+# Ces bornes couvrent donc ansible-core 2.16 (Ubuntu 24.04) comme 2.17+.
+# Les relever exige de vérifier d'abord la version de core des bastions.
 collections:
-  - name: community.docker      # docker_compose_v2, docker_login
-    version: ">=3.10.0"
+  - name: community.docker      # docker_login
+    version: ">=3.10.0,<5.0.0"
   - name: community.general     # ufw
-    version: ">=9.0.0"
+    version: ">=9.0.0,<12.0.0"
