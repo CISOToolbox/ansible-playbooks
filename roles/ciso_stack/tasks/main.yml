@@ -177,25 +177,37 @@
 # déplacement de /home vers /opt — `up -d` échoue sur un conflit de noms au
 # message obscur. Compose étiquette chaque conteneur avec son répertoire
 # d'origine : on le lit pour dire précisément quoi faire.
-- name: "Répertoire d'origine de la stack en cours d'exécution"
+- name: "Conteneurs d'une stack existante ?"
   ansible.builtin.command:
     cmd: >-
       docker inspect ciso-pilot
-      --format '{% raw %}{{ index .Config.Labels "com.docker.compose.project.working_dir" }}{% endraw %}'
+      --format '{% raw %}{{ index .Config.Labels "com.docker.compose.project.working_dir" }}|{{ .State.Running }}{% endraw %}'
   register: _running_dir
   changed_when: false
   failed_when: false
   check_mode: false      # lecture seule : doit tourner aussi en --check
 
+- name: "État et provenance des conteneurs existants"
+  ansible.builtin.set_fact:
+    _other_dir: "{{ (_running_dir.stdout | trim).split('|')[0] | default('', true) }}"
+    _other_up: "{{ (_running_dir.stdout | trim).split('|')[-1] | trim == 'true' }}"
+  when: _running_dir.rc == 0
+
+# `docker compose stop` ne suffit PAS : il arrête les conteneurs sans les
+# supprimer, et leurs noms restent réservés. C'est le geste naturel quand on
+# lit « une stack tourne déjà », d'où la distinction explicite ci-dessous.
 - name: "Refuser de démarrer une seconde stack depuis un autre répertoire"
   ansible.builtin.assert:
-    that: _running_dir.rc != 0 or (_running_dir.stdout | trim) in ["", ciso_deploy_dir]
+    that: _running_dir.rc != 0 or _other_dir in ["", ciso_deploy_dir]
     fail_msg: >-
-      Une stack tourne déjà depuis « {{ _running_dir.stdout | trim }} » alors
-      que ce déploiement vise « {{ ciso_deploy_dir }} ». Les conteneurs ayant
-      des noms fixes, démarrer ici échouerait sur un conflit.
-      Arrêtez d'abord l'ancienne — SANS -v, qui détruirait les volumes :
-        cd {{ _running_dir.stdout | trim }} && docker compose down
+      Des conteneurs de cette stack existent déjà
+      ({{ "en cours d'exécution" if _other_up | bool else "arrêtés, mais toujours présents" }})
+      et proviennent de « {{ _other_dir }} », alors que ce déploiement vise
+      « {{ ciso_deploy_dir }} ». Leurs noms étant fixes, démarrer ici
+      échouerait sur un conflit.
+      {{ "Attention : `docker compose stop` ne libère pas les noms — il faut SUPPRIMER les conteneurs." if not (_other_up | bool) else "" }}
+      Utilisez `down`, SANS -v qui détruirait les volumes :
+        cd {{ _other_dir }} && docker compose down
       Les données sont dans les volumes {{ ciso_env.COMPOSE_PROJECT_NAME }}_*,
       indépendants du répertoire : elles seront retrouvées ici.
 
