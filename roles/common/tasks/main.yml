@@ -38,9 +38,15 @@
     name: unattended-upgrades
     state: started
     enabled: true
+  # En --check le paquet n'est que simulé : l'unité systemd n'existe pas
+  # encore et la tâche échouerait sur une conséquence de la simulation.
+  when: not ansible_check_mode
 
 - name: "fail2ban actif"
   ansible.builtin.service:
     name: fail2ban
     state: started
     enabled: true
+  # En --check le paquet n'est que simulé : l'unité systemd n'existe pas
+  # encore et la tâche échouerait sur une conséquence de la simulation.
+  when: not ansible_check_mode

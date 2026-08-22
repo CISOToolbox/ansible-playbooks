@@ -53,6 +53,9 @@ ciso_tls_mode: "existing"
 # COMPOSE_PROJECT_NAME est LA valeur critique : elle préfixe les volumes.
 # Une autre valeur ferait démarrer la stack sur des bases vides — le rôle
 # refuse désormais ce cas, mais ne le corrige pas à votre place.
+# REMPLACER TOUT LE BLOC ci-dessous par le contenu de ciso_env.yml produit
+# par extract-env.sh — il contient DÉJÀ COMPOSE_PROJECT_NAME. Le compléter
+# au lieu de le remplacer crée une clé en double : YAML retient la dernière
+# et n'émet qu'un avertissement, facile à manquer dans une longue sortie.
 ciso_env:
   COMPOSE_PROJECT_NAME: "demo-docker"
-  # … coller ici les 12 autres clés de ciso_env.yml …

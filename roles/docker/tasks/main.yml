@@ -34,6 +34,9 @@
     name: docker
     state: started
     enabled: true
+  # En --check le paquet n'est que simulé : l'unité systemd n'existe pas
+  # encore et la tâche échouerait sur une conséquence de la simulation.
+  when: not ansible_check_mode
 
 # Volontairement PAS d'ajout au groupe docker : y appartenir équivaut à un
 # accès root permanent sur l'hôte, et ce compte est celui qui reçoit les
@@ -44,10 +47,12 @@
   ansible.builtin.command: docker compose version
   register: _compose_v
   changed_when: false
+  when: not ansible_check_mode
 
 - name: "Version de compose"
   ansible.builtin.debug:
     msg: "{{ _compose_v.stdout }}"
+  when: not ansible_check_mode
 
 # Les images client sont privées : sans authentification, `compose pull`
 # échoue sur elles seules et laisse la stack à moitié à jour.
