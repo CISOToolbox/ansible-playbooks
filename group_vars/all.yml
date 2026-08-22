@@ -65,3 +65,15 @@ ciso_firewall_ports:
 # font que piloter les contrôles du playbook, la planification réelle est
 # dans le conteneur.
 ciso_backup_expect_stanzas: "{{ ciso_modules + ['pilot'] }}"
+
+# Contenu du .env, partie NON secrète. La partie secrète vit dans
+# vault_env (all.vault.yml) et l'emporte en cas de clé commune.
+# Reprendre un déploiement existant : bash extract-env.sh /chemin/.env
+ciso_env:
+  COMPOSE_PROJECT_NAME: "ciso"
+  APP_URL: "https://{{ ciso_domain }}"
+  PUBLIC_BASE_URL: "https://{{ ciso_domain }}"
+  HTTP_PORT: "{{ ciso_http_port }}"
+  HTTPS_PORT: "{{ ciso_https_port }}"
+  PILOT_MODULES: "{{ ciso_modules | join(',') }}"
+  AUTH_MODE: "pilot"

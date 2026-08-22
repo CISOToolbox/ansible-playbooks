@@ -85,6 +85,45 @@
   become_user: "{{ ciso_deploy_user }}"
   changed_when: false
 
+# Compose préfixe les volumes par le nom de projet. Se tromper de nom ne
+# produit AUCUNE erreur : la stack démarre sur des volumes neufs, les bases
+# sont vides, et l'exploitant conclut à une perte de données alors que les
+# siennes dorment intactes sous l'autre préfixe. C'est le seul geste de ce
+# rôle qui puisse faire croire à un désastre, d'où ce contrôle explicite.
+- name: "Volumes de données déjà présents sur l'hôte"
+  ansible.builtin.command:
+    cmd: docker volume ls --format '{% raw %}{{.Name}}{% endraw %}'
+  become_user: "{{ ciso_deploy_user }}"
+  register: _volumes
+  changed_when: false
+
+- name: "Le nom de projet correspond-il aux volumes existants ?"
+  ansible.builtin.set_fact:
+    _project: "{{ ciso_env.COMPOSE_PROJECT_NAME }}"
+    _foreign_pgdata: >-
+      {{ _volumes.stdout_lines | select('search', '-pgdata$')
+         | reject('search', '^' ~ ciso_env.COMPOSE_PROJECT_NAME ~ '_')
+         | list }}
+    _own_pgdata: >-
+      {{ _volumes.stdout_lines
+         | select('search', '^' ~ ciso_env.COMPOSE_PROJECT_NAME ~ '_.*-pgdata$')
+         | list }}
+
+- name: "Refuser de démarrer à côté de données existantes"
+  ansible.builtin.assert:
+    that: _own_pgdata | length > 0 or _foreign_pgdata | length == 0
+    fail_msg: >-
+      COMPOSE_PROJECT_NAME vaut « {{ _project }} », mais aucun volume
+      {{ _project }}_*-pgdata n'existe alors que l'hôte en porte d'autres :
+      {{ _foreign_pgdata | join(', ') }}.
+      Démarrer maintenant créerait des bases VIDES à côté de vos données.
+      Corrigez ciso_env.COMPOSE_PROJECT_NAME pour qu'il corresponde au
+      préfixe ci-dessus, ou retirez ces volumes si vous voulez repartir de
+      zéro en connaissance de cause.
+    success_msg: >-
+      {{ _own_pgdata | length }} volume(s) de données pour le projet
+      « {{ _project }} » — la stack retrouvera ses bases.
+
 - name: "Tirer les images de la release"
   ansible.builtin.command:
     cmd: docker compose pull
