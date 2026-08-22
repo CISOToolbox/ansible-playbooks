@@ -99,3 +99,30 @@ aujourd'hui : c'est une divergence assumée à porter côté client.
 L'obtention des certificats (ni ACME ni PKI interne — ils sont fournis), la
 supervision, et la restauration. La restauration se pilote depuis Pilot, qui
 a l'interface pour ça.
+
+## Déplacer un déploiement existant
+
+Les volumes Docker sont nommés d'après `COMPOSE_PROJECT_NAME`, **pas** d'après
+le répertoire : déplacer un déploiement ne touche pas aux données, tant que le
+nom de projet ne change pas. Les conteneurs, eux, portent des noms fixes, donc
+l'ancienne stack doit être arrêtée avant que la nouvelle démarre.
+
+```bash
+# 1. arrêter l'ancienne — SANS -v, qui détruirait les volumes
+cd /ancien/chemin && sudo docker compose down
+
+# 2. déployer au nouvel emplacement
+ansible-playbook site.yml --limit <hôte>
+
+# 3. contrôler que les bases sont retrouvées (et non recréées vides)
+sudo docker compose -f /opt/ciso-toolbox/docker-compose.yml exec -T pilot-db \
+     psql -U pilot -tAc "select count(*) from users"
+```
+
+Le rôle refuse de démarrer si une stack tourne encore depuis un autre
+répertoire, et nomme celui-ci dans le message — sans ce garde-fou, l'échec se
+manifeste par un conflit de noms de conteneurs peu explicite.
+
+Une fois la bascule vérifiée, l'ancien répertoire ne contient plus que des
+fichiers de configuration régénérables. Le supprimer est sans effet sur les
+données.

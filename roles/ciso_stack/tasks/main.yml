@@ -149,6 +149,33 @@
       {{ _own_pgdata | length }} volume(s) de données pour le projet
       « {{ _project }} » — la stack retrouvera ses bases.
 
+# Les conteneurs portent des noms fixes (ciso-pilot, ciso-risk-db…). Si une
+# stack du même projet tourne depuis un AUTRE répertoire — cas d'un
+# déplacement de /home vers /opt — `up -d` échoue sur un conflit de noms au
+# message obscur. Compose étiquette chaque conteneur avec son répertoire
+# d'origine : on le lit pour dire précisément quoi faire.
+- name: "Répertoire d'origine de la stack en cours d'exécution"
+  ansible.builtin.command:
+    cmd: >-
+      docker inspect ciso-pilot
+      --format '{% raw %}{{ index .Config.Labels "com.docker.compose.project.working_dir" }}{% endraw %}'
+  become_user: "{{ ciso_deploy_user }}"
+  register: _running_dir
+  changed_when: false
+  failed_when: false
+
+- name: "Refuser de démarrer une seconde stack depuis un autre répertoire"
+  ansible.builtin.assert:
+    that: _running_dir.rc != 0 or (_running_dir.stdout | trim) in ["", ciso_deploy_dir]
+    fail_msg: >-
+      Une stack tourne déjà depuis « {{ _running_dir.stdout | trim }} » alors
+      que ce déploiement vise « {{ ciso_deploy_dir }} ». Les conteneurs ayant
+      des noms fixes, démarrer ici échouerait sur un conflit.
+      Arrêtez d'abord l'ancienne — SANS -v, qui détruirait les volumes :
+        cd {{ _running_dir.stdout | trim }} && docker compose down
+      Les données sont dans les volumes {{ ciso_env.COMPOSE_PROJECT_NAME }}_*,
+      indépendants du répertoire : elles seront retrouvées ici.
+
 - name: "Tirer les images de la release"
   ansible.builtin.command:
     cmd: docker compose pull

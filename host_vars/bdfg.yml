@@ -6,7 +6,10 @@
 # changent pas sans casse et sont commentées comme telles.
 # ─────────────────────────────────────────────────────────────────────────
 
-ciso_deploy_dir: "/home/admrl/projects/ciso-toolbox/demo-docker"
+# Déplacé hors de /home : les volumes portent le nom de PROJET, pas celui
+# du répertoire, donc les données suivent. Séquence de bascule dans le
+# README, section « Déplacer un déploiement existant ».
+ciso_deploy_dir: "/opt/ciso-toolbox"
 ciso_deploy_user: "admrl"
 ciso_domain: "pilot.sec.bdf-gestion.com"
 ciso_http_port: 80
