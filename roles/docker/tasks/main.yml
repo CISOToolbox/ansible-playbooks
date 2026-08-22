@@ -51,6 +51,22 @@
 
 # Les images client sont privées : sans authentification, `compose pull`
 # échoue sur elles seules et laisse la stack à moitié à jour.
+# Erreur de placement fréquente : ranger vault_registry_password DANS le
+# dictionnaire vault_env. Il y serait rendu comme une variable du .env — sans
+# usage — et resterait introuvable ici, où Ansible l'attend au premier
+# niveau. Le message de Jinja ne dit pas où corriger ; celui-ci le dit.
+- name: "Le mot de passe du registre est-il au bon niveau ?"
+  ansible.builtin.assert:
+    that: vault_registry_password is defined
+    fail_msg: >-
+      Des images client sont configurées ({{ ciso_client_images.keys() | join(', ') }})
+      et ciso_registry_user vaut « {{ ciso_registry_user }} », mais
+      vault_registry_password est introuvable.
+      Il doit être une clé de PREMIER NIVEAU de group_vars/all/vault.yml,
+      SŒUR de vault_env — et non une entrée à l'intérieur de vault_env, qui
+      ne contient que les variables destinées au fichier .env.
+  when: ciso_client_images | length > 0 and ciso_registry_user | length > 0
+
 - name: "Authentification au registre (images client privées)"
   community.docker.docker_login:
     registry_url: "{{ ciso_registry }}"
