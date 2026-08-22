@@ -114,6 +114,32 @@ quelle que soit la source : `docker-ce` et `docker.io` sont en conflit, et
 basculer de l'un à l'autre désinstallerait le moteur en place et arrêterait
 les conteneurs en service.
 
+## Le pare-feu de l'hôte
+
+**Non géré par défaut** (`ciso_firewall_manage: false`). C'est une politique
+d'établissement, et beaucoup d'hôtes sont déjà filtrés en amont — groupe de
+sécurité, pare-feu d'hyperviseur, nftables tenus par l'exploitant. Le
+template ne s'y substitue pas.
+
+Si vous l'activez, sachez ce qu'ufw filtre réellement sur un hôte Docker :
+
+> ufw n'arbitre **pas** les ports publiés par les conteneurs. Docker écrit ses
+> propres règles — un DNAT en `nat/PREROUTING`, puis la chaîne `DOCKER`
+> atteinte depuis `FORWARD`. Les règles d'ufw vivent dans `INPUT`. Un
+> conteneur publiant `-p 8080:8080` reste joignable depuis le réseau **même
+> avec `deny incoming` actif**.
+
+Pour cette stack, cela veut dire que seul le **port 22** est gouverné par
+ufw. Les 80/443 du proxy sont publiés par Docker : les autoriser ne change
+rien, et les refuser ne les fermerait pas. Une politique « deny incoming »
+qui laisse passer précisément les ports applicatifs est plus dangereuse que
+pas de pare-feu du tout — elle rassure à tort.
+
+Le vrai levier est de **ne publier que ce qui doit l'être**. Pour fermer
+malgré tout un port publié, il faut la chaîne `DOCKER-USER`, que Docker
+consulte avant ses propres règles et ne réécrit jamais ; ce rôle ne va pas
+jusque-là, faute de connaître vos réseaux de confiance.
+
 ## Ce qui n'est pas couvert
 
 L'obtention des certificats (ni ACME ni PKI interne — ils sont fournis), la

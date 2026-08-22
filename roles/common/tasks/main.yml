@@ -16,7 +16,6 @@
       - curl
       - git
       - gnupg
-      - ufw
       - unattended-upgrades
       - fail2ban
       - python3-requests      # requis par community.docker

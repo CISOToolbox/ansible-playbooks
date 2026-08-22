@@ -1,12 +1,64 @@
 ---
+# ═══════════════════════════════════════════════════════════════════════════
+# À LIRE AVANT D'ACTIVER ufw SUR UN HÔTE DOCKER
+#
+# ufw n'arbitre PAS les ports publiés par les conteneurs. Docker écrit ses
+# propres règles : un DNAT en nat/PREROUTING puis la chaîne DOCKER atteinte
+# depuis FORWARD. Les règles d'ufw, elles, vivent dans INPUT. Un conteneur
+# démarré avec `-p 8080:8080` reste donc joignable depuis le réseau MÊME avec
+# une politique `deny incoming` active, et sans aucune règle `allow`.
+#
+# Conséquence concrète pour cette stack : seul le port 22 est réellement
+# gouverné par ufw. Les 80/443 du proxy sont publiés par Docker — les
+# autoriser ici ne change rien, et les refuser ne les fermerait pas.
+#
+# Fermer un port publié demande la chaîne DOCKER-USER, que Docker consulte
+# avant ses propres règles et ne réécrit jamais. Ce rôle ne va pas jusque-là :
+# le faire correctement suppose de connaître les réseaux de confiance de
+# l'établissement. Ne publiez que ce qui doit l'être — c'est le vrai levier.
+# ═══════════════════════════════════════════════════════════════════════════
+
+- name: "ufw installé ?"
+  ansible.builtin.command: which ufw
+  register: _ufw_bin
+  changed_when: false
+  failed_when: false
+
+- name: "ufw"
+  ansible.builtin.package:
+    name: ufw
+    state: present
+  when: ciso_firewall_manage | bool
+
+# En --check l'installation ci-dessus n'est que simulée : le binaire n'existe
+# pas et le module ufw échouerait sur une conséquence de la simulation, pas
+# sur un défaut de configuration. On saute alors, en le disant.
+- name: "Configuration ufw non simulable (--check, ufw absent)"
+  ansible.builtin.debug:
+    msg: >-
+      ufw n'est pas installé sur l'hôte et --check ne l'installe pas :
+      les règles ne peuvent pas être évaluées ici. Une exécution réelle
+      installera ufw puis appliquera les règles dans le bon ordre.
+  when:
+    - ciso_firewall_manage | bool
+    - ansible_check_mode
+    - _ufw_bin.rc != 0
+
 # L'ordre compte : autoriser AVANT d'activer, sinon `ufw enable` coupe la
 # session SSH en cours et l'hôte devient injoignable.
+- name: "ufw est-il configurable ici ?"
+  ansible.builtin.set_fact:
+    _configurable: >-
+      {{ (ciso_firewall_manage | bool)
+         and (_ufw_bin.rc == 0 or not ansible_check_mode) }}
+
 - name: "ufw — autoriser les ports de service"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
     proto: tcp
   loop: "{{ ciso_firewall_ports }}"
+  when: _configurable | bool
 
 - name: "ufw — politique par défaut"
   community.general.ufw:
@@ -15,7 +67,17 @@
   loop:
     - { direction: incoming, policy: deny }
     - { direction: outgoing, policy: allow }
+  when: _configurable | bool
 
 - name: "ufw — activé"
   community.general.ufw:
     state: enabled
+  when: _configurable | bool
+
+- name: "Pare-feu hôte non géré par Ansible"
+  ansible.builtin.debug:
+    msg: >-
+      ciso_firewall_manage=false : le pare-feu de l'hôte est laissé tel quel.
+      Vérifiez qu'un filtrage existe en amont (groupe de sécurité, pare-feu
+      d'hyperviseur) et que seul le nécessaire est exposé.
+  when: not (ciso_firewall_manage | bool)
