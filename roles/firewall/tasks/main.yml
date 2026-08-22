@@ -23,6 +23,7 @@
   register: _ufw_bin
   changed_when: false
   failed_when: false
+  check_mode: false      # lecture seule : doit tourner aussi en --check
 
 - name: "ufw"
   ansible.builtin.package:
@@ -30,9 +31,17 @@
     state: present
   when: ciso_firewall_manage | bool
 
-# En --check l'installation ci-dessus n'est que simulée : le binaire n'existe
-# pas et le module ufw échouerait sur une conséquence de la simulation, pas
-# sur un défaut de configuration. On saute alors, en le disant.
+# Défini AVANT toute tâche qui s'en sert — une variable manquante fait échouer
+# la condition elle-même, pas la tâche.
+- name: "ufw est-il configurable ici ?"
+  ansible.builtin.set_fact:
+    _configurable: >-
+      {{ (ciso_firewall_manage | bool)
+         and (_ufw_bin.rc == 0 or not ansible_check_mode) }}
+
+# En --check l'installation n'est que simulée : le binaire n'existe pas et le
+# module ufw échouerait sur une conséquence de la simulation, pas sur un
+# défaut de configuration. On saute alors, en le disant.
 - name: "Configuration ufw non simulable (--check, ufw absent)"
   ansible.builtin.debug:
     msg: >-
@@ -41,8 +50,7 @@
       installera ufw puis appliquera les règles dans le bon ordre.
   when:
     - ciso_firewall_manage | bool
-    - ansible_check_mode
-    - _ufw_bin.rc != 0
+    - not (_configurable | bool)
 
 # Ubuntu livre DEFAULT_FORWARD_POLICY="DROP". Or la sortie d'un conteneur vers
 # l'extérieur passe par FORWARD : Surface qui scanne, Watch qui tire les flux
@@ -65,12 +73,6 @@
 
 # L'ordre compte : autoriser AVANT d'activer, sinon `ufw enable` coupe la
 # session SSH en cours et l'hôte devient injoignable.
-- name: "ufw est-il configurable ici ?"
-  ansible.builtin.set_fact:
-    _configurable: >-
-      {{ (ciso_firewall_manage | bool)
-         and (_ufw_bin.rc == 0 or not ansible_check_mode) }}
-
 - name: "ufw — autoriser les ports de service"
   community.general.ufw:
     rule: allow
