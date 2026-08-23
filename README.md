@@ -382,14 +382,14 @@ perdre rend les sauvegardes externes irrécupérables, au même titre que
 >
 > ```yaml
 > ciso_backup_s3:
->   storage_ca_file: "/certs/minio-ca.crt"   # chemin DANS les conteneurs
+>   storage_ca_file: "/opt/ciso-toolbox/certs/minio-ca.crt"   # chemin sur l'HÔTE
 >   uri_style: "path"                         # MinIO adresse par chemin
 > ```
 >
-> Le playbook active alors une surcharge supplémentaire. Montez le
-> certificat vous-même dans les conteneurs : la suite ne le fait pas à votre
-> place. Les hébergeurs publics présentent des certificats reconnus et n'ont
-> besoin de rien de tout cela.
+> Le playbook active alors une surcharge supplémentaire, qui monte
+> elle-même le certificat dans chaque conteneur — vous n'avez qu'à indiquer
+> son chemin sur l'hôte. Les hébergeurs publics présentent des certificats
+> reconnus et n'ont besoin de rien de tout cela.
 
 **Restreignez les identifiants au seul bucket**, en écriture seule si votre
 hébergeur le permet : un rançongiciel qui prend l'hôte ne doit pas pouvoir

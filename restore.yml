@@ -90,14 +90,22 @@
       loop: "{{ _mods }}"
       changed_when: true
 
+    # La restauration tourne dans le conteneur de BASE, pas dans l'agent :
+    # l'agent monte les répertoires de données en LECTURE SEULE — c'est
+    # délibéré, il n'a qu'à les lire pour sauvegarder. Y restaurer échoue sur
+    # « unable to remove '/pg/<m>/global/pg_control': Read-only file system ».
+    # Le conteneur de base, lui, monte son PGDATA en écriture et porte déjà
+    # toute la configuration pgBackRest par variables d'environnement.
+    #
     # --delta compare les fichiers plutôt que de tout retélécharger : sur un
     # hôte neuf il n'y a rien à comparer, mais sur une reprise partielle il
     # évite de rapatrier des gigaoctets déjà présents.
     - name: "Restaurer chaque base"
       ansible.builtin.command:
         argv: >-
-          {{ ['docker', 'compose', 'run', '--rm', '--entrypoint', 'pgbackrest',
-              'backup-agent', '--stanza=' ~ item, '--repo=' ~ restore_repo,
+          {{ ['docker', 'compose', 'run', '--rm', '--no-deps',
+              '--entrypoint', 'pgbackrest', item ~ '-db',
+              '--stanza=' ~ item, '--repo=' ~ restore_repo,
               '--pg1-path=/pg/' ~ item, '--delta']
              + (restore_target == 'latest') | ternary(
                  [],
