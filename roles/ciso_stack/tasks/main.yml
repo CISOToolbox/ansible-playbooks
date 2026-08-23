@@ -202,6 +202,30 @@
   when: _suite_tree.stat.exists or not ansible_check_mode
   failed_when: false      # absentes des releases antérieures à FEAT-29
 
+# Si la release ne livre pas la surcharge, le .env pointerait COMPOSE_FILE sur
+# un fichier absent et TOUTE commande docker compose échouerait — y compris
+# celles qui maintiennent la stack en vie. Le piège se referme au moment
+# précis où l'on croit renforcer ses sauvegardes.
+- name: "La release fournit-elle la surcharge S3 ?"
+  ansible.builtin.stat:
+    path: "{{ ciso_deploy_dir }}/docker-compose.s3.yml"
+  register: _s3_overlay
+  when: ciso_backup_s3 | default({}) | length > 0
+
+- name: "Refuser d'activer S3 sur une release qui ne le supporte pas"
+  ansible.builtin.assert:
+    that: _s3_overlay.stat.exists
+    fail_msg: >-
+      ciso_backup_s3 est renseigné, mais la release {{ ciso_suite_version }}
+      ne livre pas docker-compose.s3.yml — la sauvegarde externalisée y est
+      antérieure. Le .env référencerait un fichier inexistant et toutes les
+      commandes docker compose échoueraient.
+      Montez d'abord ciso_suite_version vers une release qui embarque
+      FEAT-29, ou retirez ciso_backup_s3.
+  when:
+    - ciso_backup_s3 | default({}) | length > 0
+    - not ansible_check_mode or _s3_overlay.stat is defined
+
 - name: "Configuration S3 complète ?"
   ansible.builtin.assert:
     that:
