@@ -485,6 +485,13 @@ sudo docker compose -f /opt/ciso-toolbox/docker-compose.yml exec -T pilot-db \
      psql -U pilot -tAc "select count(*) from users"
 ```
 
+Sur un hôte qui héberge **plusieurs** projets, le contrôle des volumes
+refusera de démarrer un déploiement réellement neuf : il voit des volumes
+`*-pgdata` qui ne portent pas votre préfixe et suppose une faute de frappe
+dans `COMPOSE_PROJECT_NAME`. Passez alors `-e ciso_allow_new_project=true`.
+Ne supprimez jamais les volumes qu'il énumère : ils appartiennent à l'autre
+projet.
+
 Le rôle refuse de démarrer si une stack tourne encore depuis un autre
 répertoire, et nomme celui-ci dans le message — sans ce garde-fou, l'échec se
 manifeste par un conflit de noms de conteneurs peu explicite.

@@ -269,17 +269,27 @@
          | select('search', '^' ~ ciso_env.COMPOSE_PROJECT_NAME ~ '_.*-pgdata$')
          | list }}
 
+# Échappatoire pour le cas légitime : un hôte qui héberge PLUSIEURS projets,
+# ou une reprise après sinistre où les volumes voisins appartiennent à autre
+# chose. Sans elle, le message conseillait de supprimer des volumes dont ce
+# déploiement n'est pas propriétaire — le pire conseil possible.
 - name: "Refuser de démarrer à côté de données existantes"
   ansible.builtin.assert:
-    that: _own_pgdata | length > 0 or _foreign_pgdata | length == 0
+    that: >-
+      _own_pgdata | length > 0
+      or _foreign_pgdata | length == 0
+      or (ciso_allow_new_project | default(false) | bool)
     fail_msg: >-
       COMPOSE_PROJECT_NAME vaut « {{ _project }} », mais aucun volume
       {{ _project }}_*-pgdata n'existe alors que l'hôte en porte d'autres :
       {{ _foreign_pgdata | join(', ') }}.
       Démarrer maintenant créerait des bases VIDES à côté de vos données.
-      Corrigez ciso_env.COMPOSE_PROJECT_NAME pour qu'il corresponde au
-      préfixe ci-dessus, ou retirez ces volumes si vous voulez repartir de
-      zéro en connaissance de cause.
+      Si c'est une faute de frappe, corrigez ciso_env.COMPOSE_PROJECT_NAME
+      pour qu'il corresponde au préfixe ci-dessus.
+      Si ce déploiement est RÉELLEMENT neuf et que ces volumes appartiennent
+      à un autre projet — plusieurs stacks sur le même hôte, ou une reprise
+      après sinistre — passez -e ciso_allow_new_project=true. Ne supprimez
+      pas des volumes dont ce déploiement n'est pas propriétaire.
     success_msg: >-
       {{ _own_pgdata | length }} volume(s) de données pour le projet
       « {{ _project }} » — la stack retrouvera ses bases.
