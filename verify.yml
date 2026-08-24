@@ -1,29 +1,29 @@
 ---
-# Contrôles d'exploitation, sans rien modifier.
+# Operational checks, writing nothing.
 #
 #   ansible-playbook verify.yml
-- name: "CISO Toolbox — vérifications"
+- name: "CISO Toolbox — checks"
   hosts: ciso
   become: true
   gather_facts: false
   tasks:
-    - name: "Images réellement en service"
+    - name: Images actually in service
       ansible.builtin.command:
         cmd: docker compose ps --format '{% raw %}{{.Service}}\t{{.Image}}\t{{.Status}}{% endraw %}'
         chdir: "{{ ciso_deploy_dir }}"
       register: _ps
       changed_when: false
 
-    - name: "État de la stack"
+    - name: Stack state
       ansible.builtin.debug:
         var: _ps.stdout_lines
 
-    - name: "Réponse HTTP de chaque module par la bordure"
+    - name: HTTP response of each module through the edge
       ansible.builtin.uri:
         url: "https://{{ ciso_domain }}/{{ item }}/"
-        # Un certificat « existing » vient d'ACME ou d'une PKI d'entreprise :
-        # il est aussi valide qu'un « provided ». Seul l'auto-signé échoue à
-        # la validation, et lui seul doit y échapper.
+        # An "existing" certificate comes from ACME or a corporate PKI: it is
+        # just as valid as a "provided" one. Only the self-signed case fails
+        # validation, and only it should be exempt.
         validate_certs: "{{ ciso_tls_mode != 'selfsigned' }}"
         status_code: [200, 302, 401]
       loop: "{{ ciso_modules }}"
@@ -31,17 +31,17 @@
       failed_when: false
       changed_when: false
 
-    - name: "Modules injoignables"
+    - name: Unreachable modules
       ansible.builtin.debug:
         msg: >-
           {{ _http.results | rejectattr('status', 'in', [200, 302, 401])
-             | map(attribute='item') | list | default('aucun', true) }}
+             | map(attribute='item') | list | default('none', true) }}
 
-    # Le dépôt hors site est celui dont la défaillance est SILENCIEUSE :
-    # identifiants expirés, bucket déplacé, rétention imposée par
-    # l'hébergeur. Le dépôt local, lui, se remarque tout de suite. « Locale
-    # fraîche, hors site en retard » est donc le mode de panne à détecter.
-    - name: "Fraîcheur du dépôt hors site"
+    # The off-site repository is the one whose failure is SILENT: expired
+    # credentials, a moved bucket, a retention policy imposed by the provider.
+    # The local one makes itself known immediately. "Local fresh, off-site
+    # behind" is therefore the failure mode to detect.
+    - name: Off-site repository freshness
       ansible.builtin.shell:
         cmd: >-
           docker compose exec -T backup-agent python3 -c "
@@ -60,7 +60,7 @@
       failed_when: false
       when: ciso_backup_s3 | default({}) | length > 0
 
-    - name: "Dépôts hors site en retard"
+    - name: Off-site repositories lagging
       ansible.builtin.assert:
         that: >-
           _s3_age.stdout_lines
@@ -68,17 +68,17 @@
           | select('>', ciso_backup_s3_max_age_days | default(3))
           | list | length == 0
         fail_msg: >-
-          Sauvegarde hors site en retard (seuil
-          {{ ciso_backup_s3_max_age_days | default(3) }} jours) :
+          Off-site backup lagging (threshold
+          {{ ciso_backup_s3_max_age_days | default(3) }} days):
           {{ _s3_age.stdout_lines | join(' | ') }}.
-          Un « -1 » signale une stanza sans AUCUNE sauvegarde sur le dépôt
-          externe — la protection contre la perte de l'hôte n'existe pas.
+          A "-1" means a stanza with NO backup at all on the off-site
+          repository — the protection against losing the host does not exist.
         success_msg: >-
-          Dépôt hors site à jour : {{ _s3_age.stdout_lines | join(' | ') }}
+          Off-site repository up to date: {{ _s3_age.stdout_lines | join(' | ') }}
       when:
         - ciso_backup_s3 | default({}) | length > 0
         - _s3_age.stdout | default('') | trim | length > 0
 
-    - name: "Contrôle des sauvegardes"
+    - name: Backup checks
       ansible.builtin.include_role:
         name: backup_verify

@@ -1,13 +1,13 @@
 ---
-# Le pare-feu hôte n'est PAS géré par défaut. Deux raisons.
+# The host firewall is NOT managed by default. Two reasons.
 #
-# 1. C'est une politique d'établissement. Beaucoup d'hôtes sont déjà protégés
-#    en amont (groupe de sécurité, pare-feu d'hyperviseur, nftables gérés par
-#    l'exploitant). Imposer ufw à un hôte en production, c'est refaire l'erreur
-#    du moteur Docker : remplacer ce qui marche par ce que le template préfère.
+# 1. It is an organisational policy. Many hosts are already protected
+#    upstream (cloud security group, hypervisor firewall, nftables owned by
+#    the operator). Imposing ufw on a production host repeats the mistake of
+#    the Docker engine: replacing what works with what the template prefers.
 #
-# 2. Sur un hôte Docker, ufw ne fait PAS ce qu'on croit — voir le commentaire
-#    de tasks/main.yml. Activer une politique « deny incoming » qui ne filtre
-#    en réalité aucun port publié par un conteneur est pire que de ne rien
-#    faire : ça donne une assurance qui n'existe pas.
+# 2. On a Docker host, ufw does NOT do what you think — see the comment in
+#    tasks/main.yml. Enabling a "deny incoming" policy that in reality
+#    filters none of the published container ports is worse than doing
+#    nothing: it grants an assurance that does not exist.
 ciso_firewall_manage: false

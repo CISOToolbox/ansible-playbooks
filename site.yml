@@ -1,15 +1,14 @@
 ---
-# Installation et convergence d'un hôte CISO Toolbox (Ubuntu 24.04 LTS).
+# Installation and convergence of a CISO Toolbox host (Ubuntu 24.04 LTS).
 #
 #   ansible-playbook site.yml
-#   ansible-playbook site.yml --tags stack     # redéployer la stack seule
-#   ansible-playbook site.yml --check          # simulation
+#   ansible-playbook site.yml --tags stack     # redeploy the stack alone
+#   ansible-playbook site.yml --check          # dry run
 #
-# Idempotent : rejouable à volonté. Une montée de version se fait en
-# changeant ciso_suite_version puis en rejouant upgrade.yml, qui ajoute les
-# contrôles propres à une mise à jour (migrations, images réellement en
-# service).
-- name: "CISO Toolbox — hôte et stack"
+# Idempotent: replay at will. An upgrade is done by changing
+# ciso_suite_version and then running upgrade.yml, which adds the checks
+# specific to an update (migrations, images actually in service).
+- name: "CISO Toolbox — host and stack"
   hosts: ciso
   become: true
   gather_facts: true
@@ -19,7 +18,7 @@
     - { role: firewall, tags: [firewall] }
     - { role: ciso_stack, tags: [stack] }
   post_tasks:
-    - name: "Contrôle des sauvegardes"
+    - name: Backup checks
       ansible.builtin.include_role:
         name: backup_verify
       tags: [backup]

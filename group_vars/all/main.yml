@@ -1,36 +1,35 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────
-# CISO Toolbox — variables communes (valeurs NON secrètes)
+# CISO Toolbox — common variables (NON-secret values)
 #
-# Les secrets vivent dans group_vars/all/vault.yml, chiffré par
-# ansible-vault. La forme RÉPERTOIRE est obligatoire : Ansible charge
-# tous les fichiers de group_vars/all/, mais associerait un fichier
-# nommé group_vars/all.vault.yml à un groupe « all.vault » qui
-# n'existe pas — il ne serait jamais lu, et les variables seraient
-# introuvables à l'exécution.
+# Secrets live in group_vars/all/vault.yml, encrypted with ansible-vault.
+# The DIRECTORY form is mandatory: Ansible loads every file under
+# group_vars/all/, but would associate a file named
+# group_vars/all.vault.yml with a group called "all.vault" that does not
+# exist — it would never be read, and the variables would be missing at
+# run time.
 # ─────────────────────────────────────────────────────────────────────────
 
-# La version de suite déployée. C'est LA variable qui pilote les montées de
-# version : le playbook récupère docker-compose.yml et nginx.conf à ce tag
-# précis du dépôt public. Un tag décrit une combinaison de modules testée
-# ensemble (cf. la matrice de compatibilité dans RELEASING.md) — d'où
-# l'interdiction d'écrire "main" ici.
+# The suite version deployed. This is THE variable that drives upgrades: the
+# playbook fetches docker-compose.yml and nginx.conf at that exact tag of the
+# public repository. A tag describes a combination of modules tested together
+# (see the compatibility matrix in RELEASING.md) — hence the ban on writing
+# "main" here.
 ciso_suite_version: "v0.9.2"
 ciso_suite_repo: "https://github.com/CISOToolbox/suite.git"
 
-# Où la stack est déployée sur l'hôte.
+# Where the stack is deployed on the host.
 ciso_deploy_dir: "/opt/ciso-toolbox"
 ciso_deploy_user: "ciso"
 
-# Domaine servi par le proxy. Doit correspondre au SAN du certificat.
+# Domain served by the proxy. Must match the certificate's SAN.
 ciso_domain: "ciso.example.com"
 ciso_http_port: 80
 ciso_https_port: 443
 
-# Modules effectivement déployés. Sert à deux choses : la variable
-# PILOT_MODULES (Pilot n'affiche que ceux-là) et les contrôles de santé.
-# Retirer un module ici ne le supprime pas de docker-compose.yml — voir
-# README §"Retirer un module".
+# Modules actually deployed. Used for two things: the PILOT_MODULES variable
+# (Pilot only shows those) and the health checks. Removing a module here does
+# not remove it from docker-compose.yml — see README, "Removing a module".
 ciso_modules:
   - risk
   - compliance
@@ -42,45 +41,46 @@ ciso_modules:
   - appsec
   - watch
 
-# Images client, qui remplacent l'image de suite du module correspondant.
-# Laisser vide pour un déploiement standard. Exemple :
+# Client images, replacing the suite image of the matching module. Leave
+# empty for a standard deployment. Example:
 #   ciso_client_images:
 #     surface: "ghcr.io/cisotoolbox/ciso-surface-acme:v1.0.0"
 #     access:  "ghcr.io/cisotoolbox/ciso-access-acme:v1.0.0"
 ciso_client_images: {}
 
-# Registre : nécessaire uniquement si des images client (privées) sont
-# utilisées. Le mot de passe vit dans le vault.
+# Registry: only needed when (private) client images are used. The password
+# lives in the vault.
 ciso_registry: "ghcr.io"
 ciso_registry_user: ""
 
-# Certificats TLS. Deux modes :
-#   "provided" — les fichiers sont fournis depuis le control node
-#                (files/certs/<domaine>/fullchain.pem + privkey.pem)
-#   "selfsigned" — génération locale, pour une maquette uniquement
-#   "existing"   — déjà déposés sur l'hôte (ACME, PKI d'entreprise, reprise
-#                  d'un déploiement) : le rôle vérifie leur présence, sans y toucher
+# TLS certificates. Three modes:
+#   "provided"   — files supplied from the control node
+#                  (files/certs/<domain>/cert.pem + key.pem)
+#   "selfsigned" — generated locally, for a mock-up only
+#   "existing"   — already on the host (ACME, corporate PKI, taking over an
+#                  existing deployment): the role checks they are there and
+#                  fixes their permissions, without overwriting them
 ciso_tls_mode: "provided"
 
-# Noms des fichiers dans <deploy_dir>/certs/. Ceux du nginx.conf de la release.
+# File names inside <deploy_dir>/certs/. These are the ones the release's
+# nginx.conf expects.
 ciso_tls_cert_name: "cert.pem"
 ciso_tls_key_name: "key.pem"
 
-# Ports ouverts par ufw. 22 est indispensable, ne pas le retirer sous peine
-# de perdre l'accès à l'hôte au premier `ufw enable`.
+# Ports opened by ufw. 22 is essential; removing it costs you access to the
+# host at the first `ufw enable`.
 ciso_firewall_ports:
   - "22"
   - "{{ ciso_http_port }}"
   - "{{ ciso_https_port }}"
 
-# Sauvegardes : la stack embarque backup-agent (pgBackRest). Ces valeurs ne
-# font que piloter les contrôles du playbook, la planification réelle est
-# dans le conteneur.
+# Backups: the stack embeds backup-agent (pgBackRest). These values only
+# drive the playbook's checks; the real scheduling lives in the container.
 ciso_backup_expect_stanzas: "{{ ciso_modules + ['pilot'] }}"
 
-# Contenu du .env, partie NON secrète. La partie secrète vit dans
-# vault_env (all.vault.yml) et l'emporte en cas de clé commune.
-# Reprendre un déploiement existant : bash extract-env.sh /chemin/.env
+# Contents of the .env, NON-secret part. The secret part lives in vault_env
+# (group_vars/all/vault.yml) and wins on a shared key.
+# Taking over an existing deployment: bash extract-env.sh /path/to/.env
 ciso_env:
   COMPOSE_PROJECT_NAME: "ciso"
   APP_URL: "https://{{ ciso_domain }}"
@@ -90,35 +90,41 @@ ciso_env:
   PILOT_MODULES: "{{ ciso_modules | join(',') }}"
   AUTH_MODE: "pilot"
 
-# Source de Docker : "distro" (docker.io + docker-compose-v2, signés par
-# Ubuntu, sans dépôt tiers) ou "docker-ce" (dépôt officiel Docker Inc.).
-# Sans effet si un Docker opérationnel est déjà présent : il n'est jamais
-# remplacé, les deux paquets étant en conflit.
+# Docker source: "distro" (docker.io + docker-compose-v2, signed by Ubuntu,
+# no third-party repository) or "docker-ce" (Docker Inc.'s official
+# repository). Has no effect when a working Docker is already present: it is
+# never replaced, the two packages being in conflict.
 ciso_docker_source: "distro"
 
+# The host firewall is not managed by default — see roles/firewall/defaults.
+# ciso_firewall_manage: true
+
 # ─────────────────────────────────────────────────────────────────────────
-# Sauvegarde externalisée vers un stockage objet S3 (FEAT-29). FACULTATIF.
+# Off-site backup to S3-compatible object storage. OPTIONAL.
 # ─────────────────────────────────────────────────────────────────────────
-# Le dépôt pgBackRest vit dans un volume Docker, sur le MÊME hôte et le même
-# disque que les bases qu'il protège. Cela couvre la panne logique, pas la
-# perte de l'hôte : disque mort, VM détruite, rançongiciel — bases et
-# sauvegardes disparaissent alors ensemble.
+# The pgBackRest repository lives in a Docker volume, on the SAME host and
+# the same disk as the databases it protects. That covers logical failure,
+# not losing the host: dead disk, destroyed VM, ransomware — databases and
+# backups then disappear together.
 #
-# Dictionnaire vide ⇒ aucune externalisation, comportement inchangé. Les
-# identifiants et la passphrase vont dans le vault (ciso_backup_s3_secret),
-# jamais ici.
+# Empty dictionary ⇒ no off-site backup, behaviour unchanged. Credentials
+# and the passphrase go in the vault (ciso_backup_s3_secret), never here.
 ciso_backup_s3: {}
-#   bucket: "mes-sauvegardes-ciso"
+#   bucket: "my-ciso-backups"
 #   endpoint: "s3.fr-par.scw.cloud"
 #   region: "fr-par"
 #   path: "/pgbackrest"
 #   retention_full: 4
-#   test_day: "01"          # jour du test de restauration hors site
-#   uri_style: "host"       # « path » pour MinIO et compatibles
+#   test_day: "01"           # day of month for the off-site restore test
+#   uri_style: "host"        # "path" for MinIO and compatibles
+#   storage_ca_file: "/opt/ciso-toolbox/certs/minio-ca.crt"  # HOST path
 
-# Secrets S3, à définir dans group_vars/all/vault.yml :
+# S3 secrets, to be defined in group_vars/all/vault.yml:
 #   ciso_backup_s3_secret:
 #     key: "..."
 #     key_secret: "..."
-#     cipher_pass: "..."    # facultatif ; repli sur BACKUP_CIPHER_PASS
+#     cipher_pass: "..."     # optional; falls back to BACKUP_CIPHER_PASS
 ciso_backup_s3_secret: {}
+
+# How many days the off-site repository may lag before verify.yml fails.
+ciso_backup_s3_max_age_days: 3

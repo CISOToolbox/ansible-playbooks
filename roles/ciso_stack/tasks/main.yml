@@ -1,12 +1,12 @@
 ---
-# Déploie la stack CISO Toolbox à partir d'une release publiée.
+# Deploys the CISO Toolbox stack from a published release.
 #
-# Principe : on ne réécrit JAMAIS docker-compose.yml ni nginx.conf à la main.
-# Ils viennent du dépôt public au tag `ciso_suite_version`, qui décrit une
-# combinaison de modules testée ensemble. Monter de version = changer cette
-# variable et rejouer.
+# Principle: docker-compose.yml and nginx.conf are NEVER hand-written. They
+# come from the public repository at tag `ciso_suite_version`, which describes
+# a combination of modules tested together. Upgrading = changing that
+# variable and replaying.
 
-- name: "Répertoire de déploiement"
+- name: Deployment directory
   ansible.builtin.file:
     path: "{{ ciso_deploy_dir }}"
     state: directory
@@ -14,22 +14,22 @@
     group: "{{ ciso_deploy_user }}"
     mode: "0750"
 
-- name: "Récupérer la release {{ ciso_suite_version }}"
+- name: Fetch release {{ ciso_suite_version }}
   ansible.builtin.git:
     repo: "{{ ciso_suite_repo }}"
     dest: "{{ ciso_deploy_dir }}/suite"
     version: "{{ ciso_suite_version }}"
     depth: 1
-    force: true            # les fichiers viennent du dépôt, jamais édités ici
+    force: true            # files come from the repository, never edited here
   become_user: "{{ ciso_deploy_user }}"
   register: _suite_git
 
-# Trois postures, parce qu'un certificat n'arrive pas toujours par le même
-# chemin : fourni depuis le nœud de contrôle, déjà déposé sur l'hôte par un
-# autre outil (ACME, PKI d'entreprise), ou auto-signé pour une maquette.
-# Les NOMS de fichiers sont variables : nginx.conf de la release attend
-# cert.pem / key.pem, mais un déploiement existant peut les nommer autrement.
-- name: "Répertoire des certificats"
+# Three postures, because a certificate does not always arrive the same way:
+# provided from the control node, already placed on the host by another tool
+# (ACME, corporate PKI), or self-signed for a mock-up.
+# File NAMES are variable: the release's nginx.conf expects cert.pem /
+# key.pem, but an existing deployment may name them otherwise.
+- name: Certificates directory
   ansible.builtin.file:
     path: "{{ ciso_deploy_dir }}/certs"
     state: directory
@@ -38,7 +38,7 @@
     mode: "0750"
   tags: [certs]
 
-- name: "Certificats TLS fournis depuis le nœud de contrôle"
+- name: TLS certificates provided from the control node
   ansible.builtin.copy:
     src: "certs/{{ ciso_domain }}/{{ item }}"
     dest: "{{ ciso_deploy_dir }}/certs/{{ item }}"
@@ -48,10 +48,10 @@
     - "{{ ciso_tls_cert_name }}"
     - "{{ ciso_tls_key_name }}"
   when: ciso_tls_mode == "provided"
-  notify: redémarrer le proxy
+  notify: Recreate the proxy
   tags: [certs]
 
-- name: "Certificats TLS déjà présents sur l'hôte"
+- name: TLS certificates already present on the host
   ansible.builtin.stat:
     path: "{{ ciso_deploy_dir }}/certs/{{ item }}"
   loop:
@@ -61,21 +61,21 @@
   when: ciso_tls_mode == "existing"
   tags: [certs]
 
-- name: "Vérifier que les certificats existants sont bien là"
+- name: Check that the existing certificates are really there
   ansible.builtin.assert:
     that: _tls_stat.results | map(attribute='stat.exists') | select | list | length == 2
     fail_msg: >-
-      ciso_tls_mode=existing mais {{ ciso_deploy_dir }}/certs/ ne contient pas
-      {{ ciso_tls_cert_name }} et {{ ciso_tls_key_name }}. Le proxy refuserait
-      de démarrer — nginx échoue si ssl_certificate pointe dans le vide.
+      ciso_tls_mode=existing but {{ ciso_deploy_dir }}/certs/ does not contain
+      {{ ciso_tls_cert_name }} and {{ ciso_tls_key_name }}. The proxy would
+      refuse to start — nginx fails when ssl_certificate points at nothing.
   when: ciso_tls_mode == "existing"
   tags: [certs]
 
-# Maquette uniquement : un certificat auto-signé fait démarrer le proxy et
-# lever le TLS, mais tout navigateur l'affichera comme non fiable. Le SAN
-# couvre le domaine et ses sous-domaines, faute de quoi les modules servis
-# sur un sous-domaine échoueraient là où la racine passerait.
-- name: "Certificat auto-signé (maquette)"
+# Mock-ups only: a self-signed certificate lets the proxy start and raise
+# TLS, but every browser will show it as untrusted. The SAN covers the domain
+# and its subdomains — without that, modules served on a subdomain would fail
+# where the root would pass.
+- name: Self-signed certificate (mock-up)
   ansible.builtin.command:
     argv:
       - openssl
@@ -96,56 +96,55 @@
       - "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_cert_name }}"
     creates: "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_cert_name }}"
   when: ciso_tls_mode == "selfsigned"
-  notify: redémarrer le proxy
+  notify: Recreate the proxy
   tags: [certs]
 
-- name: "Rappeler qu'un certificat auto-signé n'est pas fiable"
+- name: Remind that a self-signed certificate is not trusted
   ansible.builtin.debug:
     msg: >-
-      ciso_tls_mode=selfsigned : le proxy sert un certificat auto-signé pour
-      {{ ciso_domain }}. Aucun navigateur ne le considérera comme valide —
-      réservé aux maquettes.
+      ciso_tls_mode=selfsigned: the proxy serves a self-signed certificate for
+      {{ ciso_domain }}. No browser will consider it valid — mock-ups only.
   when: ciso_tls_mode == "selfsigned"
   tags: [certs]
 
-- name: "Refuser un mode TLS inconnu"
+- name: Refuse an unknown TLS mode
   ansible.builtin.assert:
     that: ciso_tls_mode in ["provided", "existing", "selfsigned"]
     fail_msg: >-
-      ciso_tls_mode vaut « {{ ciso_tls_mode }} », qui n'est pas reconnu.
-      Sans certificat déposé, le proxy boucle sur un ssl_certificate
-      introuvable. Valeurs acceptées : provided, existing, selfsigned.
+      ciso_tls_mode is "{{ ciso_tls_mode }}", which is not recognised.
+      With no certificate in place, the proxy loops on a missing
+      ssl_certificate. Accepted values: provided, existing, selfsigned.
   tags: [certs]
 
-# En --check, le module git ANNONCE le clone sans le faire : l'arbre n'existe
-# pas et tout ce qui en dépend échouerait sur une conséquence de la simulation.
-# On le détecte pour sauter proprement, en disant ce qui n'a pas pu être
-# évalué — plutôt que de laisser croire à une configuration fautive.
-- name: "Arbre de la release présent ?"
+# Under --check the git module ANNOUNCES the clone without doing it: the tree
+# does not exist and everything depending on it would fail on a consequence of
+# the simulation. We detect that to skip cleanly, saying what could not be
+# evaluated — rather than letting it look like a faulty configuration.
+- name: Is the release tree present?
   ansible.builtin.stat:
     path: "{{ ciso_deploy_dir }}/suite/docker-compose.yml"
   register: _suite_tree
 
-- name: "Ce que la simulation ne peut pas couvrir"
+- name: What the simulation cannot cover
   ansible.builtin.debug:
     msg: >-
-      L'arbre de la release n'est pas cloné et --check ne le clone pas :
-      la copie du compose, la substitution des images client, le rendu de
-      nginx.conf et la validation `docker compose config` ne sont pas
-      évalués ici. Les contrôles qui portent sur l'ÉTAT de l'hôte — volumes
-      de données, stack déjà en cours d'exécution — le sont, eux.
+      The release tree is not cloned and --check will not clone it: copying
+      the compose file, substituting client images, rendering nginx.conf and
+      the `docker compose config` validation are not evaluated here. The
+      checks that look at the STATE of the host — data volumes, an already
+      running stack — are.
   when: ansible_check_mode and not _suite_tree.stat.exists
 
-# Le proxy n'ayant pas DAC_OVERRIDE, il lui faut une permission explicite sur
-# la clé privée. La rendre lisible par « autres » l'exposerait à tous les
-# comptes de l'hôte ; on fait du conteneur son PROPRIÉTAIRE (root dans le
-# conteneur = root sur l'hôte, sans remappage d'espace de noms), et la
-# permission propriétaire suffit.
+# The proxy has no DAC_OVERRIDE, so it needs an explicit permission on the
+# private key. Making it world-readable would expose it to every account on
+# the host; instead we make the container its OWNER (root in the container =
+# root on the host, with no user-namespace remapping), and the owner
+# permission is enough.
 #
-# S'applique aussi en mode « existing » : un privkey.pem déposé par certbot ou
-# une PKI d'entreprise arrive en 0600 pour un autre compte, et le proxy boucle
-# alors sur « cannot load certificate key ... Permission denied ».
-- name: "Certificats lisibles par le proxy durci"
+# This applies in "existing" mode too: a privkey.pem placed by certbot or a
+# corporate PKI arrives as 0600 for another account, and the proxy then loops
+# on "cannot load certificate key ... Permission denied".
+- name: Certificates readable by the hardened proxy
   ansible.builtin.file:
     path: "{{ item.path }}"
     owner: root
@@ -157,10 +156,10 @@
     - { path: "{{ ciso_deploy_dir }}/certs/{{ ciso_tls_key_name }}", mode: "0640" }
   loop_control:
     label: "{{ item.path }}"
-  notify: redémarrer le proxy
+  notify: Recreate the proxy
   tags: [certs]
 
-- name: "docker-compose.yml de la release"
+- name: docker-compose.yml from the release
   ansible.builtin.copy:
     remote_src: true
     src: "{{ ciso_deploy_dir }}/suite/docker-compose.yml"
@@ -170,10 +169,10 @@
   register: _compose_file
   when: _suite_tree.stat.exists or not ansible_check_mode
 
-# Les images client remplacent l'image de suite du module concerné. Le tag
-# et le digest de la release sont retirés : une image client a ses propres
-# empreintes, et laisser le digest d'origine ferait échouer le pull.
-- name: "Substituer les images client"
+# Client images replace the suite image of the module concerned. The release
+# tag and digest are stripped: a client image has its own fingerprints, and
+# keeping the original digest would make the pull fail.
+- name: Substitute client images
   ansible.builtin.replace:
     path: "{{ ciso_deploy_dir }}/docker-compose.yml"
     regexp: '^(\s+image:\s*)\S*ciso-{{ item.key }}-suite:\S+$'
@@ -186,10 +185,10 @@
     - _suite_tree.stat.exists or not ansible_check_mode
   register: _client_images
 
-# La surcharge S3 vient de la release au même titre que le compose : c'est
-# elle qui définit repo2 pour les dix bases et pour l'agent. Copiée
-# systématiquement — inerte tant que COMPOSE_FILE ne la référence pas.
-- name: "docker-compose.s3.yml de la release"
+# The S3 overlay comes from the release just like the compose file: it is
+# what defines repo2 for the ten databases and for the agent. Copied
+# unconditionally — inert as long as COMPOSE_FILE does not reference it.
+- name: S3 overlays from the release
   ansible.builtin.copy:
     remote_src: true
     src: "{{ ciso_deploy_dir }}/suite/{{ item }}"
@@ -200,33 +199,33 @@
     - docker-compose.s3.yml
     - docker-compose.s3-ca.yml
   when: _suite_tree.stat.exists or not ansible_check_mode
-  failed_when: false      # absentes des releases antérieures à FEAT-29
+  failed_when: false      # absent from releases predating FEAT-29
 
-# Si la release ne livre pas la surcharge, le .env pointerait COMPOSE_FILE sur
-# un fichier absent et TOUTE commande docker compose échouerait — y compris
-# celles qui maintiennent la stack en vie. Le piège se referme au moment
-# précis où l'on croit renforcer ses sauvegardes.
-- name: "La release fournit-elle la surcharge S3 ?"
+# If the release does not ship the overlay, the .env would point COMPOSE_FILE
+# at a missing file and EVERY docker compose command would fail — including
+# the ones that keep the stack alive. The trap springs at the exact moment
+# one believes they are strengthening their backups.
+- name: Does the release provide the S3 overlay?
   ansible.builtin.stat:
     path: "{{ ciso_deploy_dir }}/docker-compose.s3.yml"
   register: _s3_overlay
   when: ciso_backup_s3 | default({}) | length > 0
 
-- name: "Refuser d'activer S3 sur une release qui ne le supporte pas"
+- name: Refuse to enable S3 on a release that does not support it
   ansible.builtin.assert:
     that: _s3_overlay.stat.exists
     fail_msg: >-
-      ciso_backup_s3 est renseigné, mais la release {{ ciso_suite_version }}
-      ne livre pas docker-compose.s3.yml — la sauvegarde externalisée y est
-      antérieure. Le .env référencerait un fichier inexistant et toutes les
-      commandes docker compose échoueraient.
-      Montez d'abord ciso_suite_version vers une release qui embarque
-      FEAT-29, ou retirez ciso_backup_s3.
+      ciso_backup_s3 is set, but release {{ ciso_suite_version }} does not
+      ship docker-compose.s3.yml — off-site backup postdates it. The .env
+      would reference a missing file and every docker compose command would
+      fail.
+      Raise ciso_suite_version to a release that carries off-site backup
+      first, or remove ciso_backup_s3.
   when:
     - ciso_backup_s3 | default({}) | length > 0
     - not ansible_check_mode or _s3_overlay.stat is defined
 
-- name: "Configuration S3 complète ?"
+- name: Is the S3 configuration complete?
   ansible.builtin.assert:
     that:
       - ciso_backup_s3.bucket is defined
@@ -234,13 +233,13 @@
       - ciso_backup_s3_secret.key is defined
       - ciso_backup_s3_secret.key_secret is defined
     fail_msg: >-
-      ciso_backup_s3 est renseigné mais incomplet. Il faut au minimum
-      bucket + endpoint, et dans le vault ciso_backup_s3_secret.key et
-      .key_secret. Une configuration partielle empêcherait la stack de
-      démarrer : pgBackRest refuse une variable vide.
+      ciso_backup_s3 is set but incomplete. It needs at least bucket +
+      endpoint, and in the vault ciso_backup_s3_secret.key and .key_secret.
+      A partial configuration would stop the stack from starting: pgBackRest
+      refuses an empty variable.
   when: ciso_backup_s3 | default({}) | length > 0
 
-- name: "nginx.conf de la release"
+- name: nginx.conf from the release
   ansible.builtin.copy:
     remote_src: true
     src: "{{ ciso_deploy_dir }}/suite/nginx.conf"
@@ -248,12 +247,12 @@
     owner: "{{ ciso_deploy_user }}"
     mode: "0640"
   when: _suite_tree.stat.exists or not ansible_check_mode
-  # Un `nginx -s reload` NE relit PAS ce fichier : il est monté comme fichier
-  # unique, donc lié à son inode, et la plupart des éditeurs le remplacent.
-  # Seule une recréation du conteneur prend l'édition en compte.
-  notify: redémarrer le proxy
+  # An `nginx -s reload` does NOT re-read this file: it is mounted as a
+  # single file, therefore bound to its inode, and most editors replace it.
+  # Only recreating the container picks the edit up.
+  notify: Recreate the proxy
 
-- name: ".env"
+- name: .env
   ansible.builtin.template:
     src: env.j2
     dest: "{{ ciso_deploy_dir }}/.env"
@@ -262,26 +261,26 @@
   register: _env_file
   no_log: true
 
-- name: "Valider le compose avant tout démarrage"
+- name: Validate the compose file before any start
   ansible.builtin.command:
     cmd: docker compose config -q
     chdir: "{{ ciso_deploy_dir }}"
   changed_when: false
   when: _suite_tree.stat.exists or not ansible_check_mode
 
-# Compose préfixe les volumes par le nom de projet. Se tromper de nom ne
-# produit AUCUNE erreur : la stack démarre sur des volumes neufs, les bases
-# sont vides, et l'exploitant conclut à une perte de données alors que les
-# siennes dorment intactes sous l'autre préfixe. C'est le seul geste de ce
-# rôle qui puisse faire croire à un désastre, d'où ce contrôle explicite.
-- name: "Volumes de données déjà présents sur l'hôte"
+# Compose prefixes volumes with the project name. Getting that name wrong
+# produces NO error at all: the stack starts on fresh volumes, the databases
+# are empty, and the operator concludes data was lost while theirs sleeps
+# intact under the other prefix. It is the only move in this role that can
+# look like a disaster, hence this explicit check.
+- name: Data volumes already present on the host
   ansible.builtin.command:
     cmd: docker volume ls --format '{% raw %}{{.Name}}{% endraw %}'
   register: _volumes
   changed_when: false
-  check_mode: false      # lecture seule : doit tourner aussi en --check
+  check_mode: false      # read-only: must run under --check too
 
-- name: "Le nom de projet correspond-il aux volumes existants ?"
+- name: Does the project name match the existing volumes?
   ansible.builtin.set_fact:
     _project: "{{ ciso_env.COMPOSE_PROJECT_NAME }}"
     _foreign_pgdata: >-
@@ -293,42 +292,41 @@
          | select('search', '^' ~ ciso_env.COMPOSE_PROJECT_NAME ~ '_.*-pgdata$')
          | list }}
 
-# Échappatoire pour le cas légitime : un hôte qui héberge PLUSIEURS projets,
-# ou une reprise après sinistre où les volumes voisins appartiennent à autre
-# chose. Sans elle, le message conseillait de supprimer des volumes dont ce
-# déploiement n'est pas propriétaire — le pire conseil possible.
-- name: "Refuser de démarrer à côté de données existantes"
+# An escape hatch for the legitimate case: a host running SEVERAL projects,
+# or a disaster recovery where the neighbouring volumes belong to something
+# else. Without it, the message advised deleting volumes this deployment does
+# not own — the worst possible advice.
+- name: Refuse to start next to existing data
   ansible.builtin.assert:
     that: >-
       _own_pgdata | length > 0
       or _foreign_pgdata | length == 0
       or (ciso_allow_new_project | default(false) | bool)
     fail_msg: >-
-      COMPOSE_PROJECT_NAME vaut « {{ _project }} », mais aucun volume
-      {{ _project }}_*-pgdata n'existe alors que l'hôte en porte d'autres :
+      COMPOSE_PROJECT_NAME is "{{ _project }}", but no {{ _project }}_*-pgdata
+      volume exists while the host carries others:
       {{ _foreign_pgdata | join(', ') }}.
-      Démarrer maintenant créerait des bases VIDES à côté de vos données.
-      Si c'est une faute de frappe, corrigez ciso_env.COMPOSE_PROJECT_NAME
-      pour qu'il corresponde au préfixe ci-dessus.
-      Si ce déploiement est RÉELLEMENT neuf et que ces volumes appartiennent
-      à un autre projet — plusieurs stacks sur le même hôte, ou une reprise
-      après sinistre — passez -e ciso_allow_new_project=true. Ne supprimez
-      pas des volumes dont ce déploiement n'est pas propriétaire.
+      Starting now would create EMPTY databases next to your data.
+      If this is a typo, fix ciso_env.COMPOSE_PROJECT_NAME so it matches the
+      prefix above.
+      If this deployment is GENUINELY new and those volumes belong to another
+      project — several stacks on one host, or a disaster recovery — pass
+      -e ciso_allow_new_project=true. Do not delete volumes this deployment
+      does not own.
     success_msg: >-
-      {{ _own_pgdata | length }} volume(s) de données pour le projet
-      « {{ _project }} » — la stack retrouvera ses bases.
+      {{ _own_pgdata | length }} data volume(s) for project "{{ _project }}"
+      — the stack will find its databases again.
 
-# Les conteneurs portent des noms fixes (ciso-pilot, ciso-risk-db…). Si une
-# stack du même projet existe depuis un AUTRE répertoire — cas d'un
-# déplacement de /home vers /opt — `up -d` échoue sur un conflit de noms au
-# message obscur. Compose étiquette chaque conteneur avec son répertoire
-# d'origine : on interroge le démon, pas le système de fichiers, et on le lit
-# pour dire précisément quoi faire.
+# Containers carry fixed names (ciso-pilot, ciso-risk-db…). If a stack of the
+# same project exists from ANOTHER directory — the case of a move from /home
+# to /opt — `up -d` fails on a name conflict with an obscure message. Compose
+# labels every container with its originating directory: we query the daemon,
+# not the filesystem, and read it to say precisely what to do.
 #
-# On sonde TOUS les conteneurs du projet, pas seulement ciso-pilot : une stack
-# partielle (Pilot retiré à la main, modules restants) échapperait sinon au
-# contrôle tout en faisant échouer le démarrage.
-- name: "Conteneurs d'une stack existante ?"
+# We probe ALL of the project's containers, not just ciso-pilot: a partial
+# stack (Pilot removed by hand, other modules left) would otherwise escape the
+# check while still breaking the start.
+- name: Containers from an existing stack?
   ansible.builtin.command:
     cmd: >-
       docker ps -a
@@ -337,9 +335,9 @@
   register: _existing
   changed_when: false
   failed_when: false
-  check_mode: false      # lecture seule : doit tourner aussi en --check
+  check_mode: false      # read-only: must run under --check too
 
-- name: "État et provenance des conteneurs existants"
+- name: State and origin of the existing containers
   ansible.builtin.set_fact:
     _other_dirs: >-
       {{ _existing.stdout_lines | map('regex_replace', '\|.*$', '')
@@ -349,37 +347,37 @@
       {{ _existing.stdout_lines | select('search', '\|running$')
          | list | length > 0 }}
 
-# `docker compose stop` ne suffit PAS : il arrête les conteneurs sans les
-# supprimer, et leurs noms restent réservés. C'est le geste naturel quand on
-# lit « une stack tourne déjà », d'où la distinction explicite ci-dessous.
-- name: "Refuser de démarrer une seconde stack depuis un autre répertoire"
+# `docker compose stop` is NOT enough: it stops containers without removing
+# them, and their names stay reserved. That is the natural move when reading
+# "a stack is already running", hence the explicit distinction below.
+- name: Refuse to start a second stack from another directory
   ansible.builtin.assert:
     that: _other_dirs | length == 0
     fail_msg: >-
-      Des conteneurs du projet « {{ ciso_env.COMPOSE_PROJECT_NAME }} » existent
-      déjà ({{ "certains en cours d'exécution" if _other_up | bool else "arrêtés, mais toujours présents" }})
-      et proviennent de {{ _other_dirs | map('regex_replace', '^(.*)$', '« \1 »') | join(', ') }},
-      alors que ce déploiement vise « {{ ciso_deploy_dir }} ». Leurs noms étant
-      fixes, démarrer ici échouerait sur un conflit.
-      {{ "Attention : `docker compose stop` ne libère pas les noms — il faut SUPPRIMER les conteneurs." if not (_other_up | bool) else "" }}
-      Utilisez `down`, SANS -v qui détruirait les volumes :
+      Containers of project "{{ ciso_env.COMPOSE_PROJECT_NAME }}" already
+      exist ({{ "some running" if _other_up | bool else "stopped, but still present" }})
+      and come from {{ _other_dirs | map('regex_replace', '^(.*)$', '"\1"') | join(', ') }},
+      while this deployment targets "{{ ciso_deploy_dir }}". Their names being
+      fixed, starting here would fail on a conflict.
+      {{ "Careful: `docker compose stop` does not free the names — the containers must be REMOVED." if not (_other_up | bool) else "" }}
+      Use `down`, WITHOUT -v which would destroy the volumes:
       {% for d in _other_dirs %}  cd {{ d }} && docker compose down
       {% endfor %}
-      Les données sont dans les volumes {{ ciso_env.COMPOSE_PROJECT_NAME }}_*,
-      indépendants du répertoire : elles seront retrouvées ici.
+      The data lives in the {{ ciso_env.COMPOSE_PROJECT_NAME }}_* volumes,
+      independent of the directory: it will be found again here.
     success_msg: >-
-      Aucun conteneur du projet « {{ ciso_env.COMPOSE_PROJECT_NAME }} » ne
-      provient d'un autre répertoire — pas de conflit de noms attendu.
+      No container of project "{{ ciso_env.COMPOSE_PROJECT_NAME }}" comes from
+      another directory — no name conflict expected.
 
-# Après un déplacement, `down` supprime les conteneurs et donc leurs politiques
-# `restart`. Mais un mécanisme EXTERNE — unité systemd, cron @reboot, rc.local —
-# qui relance l'ancien répertoire survit à l'opération et ne se manifeste qu'au
-# prochain redémarrage : deux stacks se disputent alors les mêmes noms de
-# conteneurs et les mêmes ports, des semaines après la bascule.
+# After a move, `down` removes the containers and therefore their `restart`
+# policies. But an EXTERNAL mechanism — systemd unit, cron @reboot, rc.local —
+# that relaunches the old directory survives the operation and only shows up
+# at the next reboot: two stacks then fight over the same container names and
+# the same ports, weeks after the switch.
 #
-# La release s'appuie sur `restart: unless-stopped`, donc AUCUN mécanisme
-# externe n'est nécessaire ici : tout ce qu'on trouve est suspect.
-- name: "Mécanismes de démarrage au boot pointant ailleurs"
+# The release relies on `restart: unless-stopped`, so NO external mechanism is
+# needed here: anything found is suspect.
+- name: Boot-time start mechanisms pointing elsewhere
   ansible.builtin.shell:
     cmd: >-
       grep -rnsE 'docker[ -]compose'
@@ -387,32 +385,32 @@
       2>/dev/null | grep -v {{ ciso_deploy_dir | quote }} || true
   register: _boot_hooks
   changed_when: false
-  check_mode: false      # lecture seule : doit tourner aussi en --check
+  check_mode: false      # read-only: must run under --check too
 
-- name: "Avertir d'un démarrage automatique concurrent"
+- name: Warn about a competing automatic start
   ansible.builtin.debug:
     msg: >-
-      ATTENTION — un mécanisme de démarrage automatique référence un
-      déploiement autre que « {{ ciso_deploy_dir }} ». Au prochain
-      redémarrage, deux stacks se disputeront les mêmes noms de conteneurs.
-      La release utilise `restart: unless-stopped` et n'a besoin d'aucune
-      unité ni cron : désactivez ce qui suit.
+      WARNING — an automatic start mechanism references a deployment other
+      than "{{ ciso_deploy_dir }}". At the next reboot, two stacks will fight
+      over the same container names.
+      The release uses `restart: unless-stopped` and needs no unit and no
+      cron entry: disable what follows.
       {{ _boot_hooks.stdout_lines | join(' | ') }}
   when: _boot_hooks.stdout | trim | length > 0
 
-- name: "Tirer les images de la release"
+- name: Pull the release images
   ansible.builtin.command:
     cmd: docker compose pull
     chdir: "{{ ciso_deploy_dir }}"
   changed_when: true
 
-- name: "Démarrer la stack"
+- name: Start the stack
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: "{{ ciso_deploy_dir }}"
   changed_when: true
 
-- name: "Attendre que les services soient sains"
+- name: Wait for the services to become healthy
   ansible.builtin.shell:
     cmd: >-
       docker compose ps --format '{% raw %}{{.Service}} {{.Health}}{% endraw %}'
@@ -424,16 +422,17 @@
   delay: 10
   changed_when: false
 
-# Le contrôle qui a manqué lors d'une migration réelle : ni le contenu du
-# compose ni l'absence d'erreur dans les logs ne prouvent qu'un conteneur
-# tourne sur la bonne image. Seule la colonne Image de `compose ps` fait foi.
-- name: "Images réellement en service"
+# The check that was missing during a real migration: neither the contents of
+# the compose file nor the absence of errors in the logs prove that a
+# container runs on the right image. Only the Image column of `compose ps`
+# is authoritative.
+- name: Images actually in service
   ansible.builtin.command:
     cmd: docker compose ps --format '{% raw %}{{.Service}}\t{{.Image}}{% endraw %}'
     chdir: "{{ ciso_deploy_dir }}"
   register: _running_images
   changed_when: false
 
-- name: "Récapitulatif des images"
+- name: Image summary
   ansible.builtin.debug:
     var: _running_images.stdout_lines

@@ -1,10 +1,9 @@
 ---
-# Contrôle des sauvegardes. À jouer après un déploiement et périodiquement :
-# une stanza créée ne prouve rien, c'est le premier "full" qui ouvre la
-# fenêtre de restauration. Tant qu'il n'est pas passé, l'archivage WAL tourne
-# sans rien sur quoi rejouer.
+# Backup checks. Run after a deployment and periodically: a created stanza
+# proves nothing, it is the first "full" that opens the recovery window.
+# Until it has run, WAL archiving turns without anything to replay onto.
 
-- name: "État pgBackRest par module"
+- name: pgBackRest state per module
   ansible.builtin.command:
     cmd: docker compose exec -T backup-agent pgbackrest --stanza={{ item }} info --output=json
     chdir: "{{ ciso_deploy_dir }}"
@@ -13,7 +12,10 @@
   changed_when: false
   failed_when: false
 
-- name: "Stanzas sans sauvegarde complète"
+# Two cases count as "no full backup": the command succeeded but reports no
+# full backup, AND the command failed outright — an unreachable stanza is not
+# a protected one.
+- name: Stanzas without a full backup
   ansible.builtin.set_fact:
     _no_full: >-
       {{ _stanzas.results
@@ -23,16 +25,16 @@
          + _stanzas.results | selectattr('rc', 'ne', 0)
          | map(attribute='item') | list }}
 
-- name: "Alerte : aucune sauvegarde complète"
+- name: "Alert: no full backup"
   ansible.builtin.debug:
     msg: >-
-      Aucun backup full pour : {{ _no_full | join(', ') }}.
-      La fenêtre de restauration n'est PAS ouverte pour ces modules.
-      Forcer avec :  docker compose exec backup-agent pgbackrest
+      No full backup for: {{ _no_full | join(', ') }}.
+      The recovery window is NOT open for these modules.
+      Force one with:  docker compose exec backup-agent pgbackrest
       --stanza=<module> --type=full backup
   when: _no_full | length > 0
 
-- name: "Sauvegardes complètes présentes partout"
+- name: Full backups present everywhere
   ansible.builtin.debug:
-    msg: "Toutes les stanzas ({{ ciso_backup_expect_stanzas | length }}) ont au moins une sauvegarde complète."
+    msg: "All stanzas ({{ ciso_backup_expect_stanzas | length }}) have at least one full backup."
   when: _no_full | length == 0

@@ -1,32 +1,32 @@
 ---
-# Reprise après perte de l'hôte (FEAT-29).
+# Recovery after losing the host.
 #
-# Reconstruit la suite sur un hôte NEUF et y restaure une sauvegarde
-# désignée, depuis le dépôt hors site. Ne suppose aucun accès à l'ancienne
-# machine : la passphrase du dépôt et les identifiants S3 suffisent.
+# Rebuilds the suite on a FRESH host and restores a designated backup there,
+# from the off-site repository. It assumes no access to the old machine: the
+# repository passphrase and the S3 credentials are enough.
 #
-#   ansible-playbook restore.yml --limit <hôte> \
+#   ansible-playbook restore.yml --limit <host> \
 #     -e restore_repo=2 -e restore_target=latest
 #
-#   ansible-playbook restore.yml --limit <hôte> \
+#   ansible-playbook restore.yml --limit <host> \
 #     -e restore_repo=2 -e '{"restore_target": "2026-08-22 20:00:00+00"}'
 #
-#   ansible-playbook restore.yml --limit <hôte> \
+#   ansible-playbook restore.yml --limit <host> \
 #     -e restore_repo=2 -e restore_modules="pilot,risk"
 #
-# ⚠ Une cible horodatée EXIGE la forme JSON ci-dessus. En `-e clé=valeur`,
-#   Ansible découpe sur les espaces : « 2026-08-22 20:00:00+00 » devient
-#   « 2026-08-22 » et vous restaurez à MINUIT sans aucun avertissement,
-#   perdant les vingt heures que vous vouliez garder. Une assertion refuse
-#   désormais une date sans heure, précisément pour rendre ce piège bruyant.
+# ⚠ A timestamped target REQUIRES the JSON form above. With `-e key=value`,
+#   Ansible splits on spaces: "2026-08-22 20:00:00+00" becomes "2026-08-22"
+#   and you restore to MIDNIGHT with no warning at all, losing the twenty
+#   hours you meant to keep. An assertion now refuses a date without a time,
+#   precisely to make this trap loud.
 #
-# `restore_target` accepte « latest », un instant, ou un libellé de
-# sauvegarde (`pgbackrest info` les liste).
+# `restore_target` accepts "latest", a point in time, or a backup label
+# (`pgbackrest info` lists them).
 #
-# ⚠ ÉCRASE les données des modules restaurés. Le playbook exige une
-# confirmation explicite — un playbook de reprise se lance dans l'urgence,
-# c'est exactement le moment où l'on se trompe d'hôte.
-- name: "CISO Toolbox — restauration"
+# ⚠ OVERWRITES the data of the restored modules. The playbook demands an
+# explicit confirmation — a recovery playbook is run under pressure, which is
+# exactly when one targets the wrong host.
+- name: "CISO Toolbox — restore"
   hosts: ciso
   become: true
   gather_facts: true
@@ -38,69 +38,68 @@
     restore_confirm: ""
 
   pre_tasks:
-    - name: "Exiger une confirmation explicite"
+    - name: Require an explicit confirmation
       ansible.builtin.assert:
         that: restore_confirm == inventory_hostname
         fail_msg: >-
-          Cette opération ÉCRASE les bases de « {{ inventory_hostname }} ».
-          Relancez avec -e restore_confirm={{ inventory_hostname }} pour
-          confirmer que c'est bien l'hôte visé.
+          This operation OVERWRITES the databases of "{{ inventory_hostname }}".
+          Re-run with -e restore_confirm={{ inventory_hostname }} to confirm
+          this is the intended host.
 
-    # Une date nue est presque toujours le symptôme d'un « -e clé=valeur »
-    # découpé sur l'espace, pas une intention. Restaurer à minuit quand on
-    # visait 20 h ne se remarque qu'après coup, quand les données manquantes
-    # sont cherchées — d'où ce refus, plutôt qu'un défaut silencieux.
-    - name: "Refuser une cible horodatée ambiguë"
+    # A bare date is almost always the symptom of an `-e key=value` split on
+    # a space, not an intention. Restoring to midnight when 8pm was meant is
+    # only noticed afterwards, when the missing data is looked for — hence
+    # this refusal, rather than a silent default.
+    - name: Refuse an ambiguous timestamped target
       ansible.builtin.assert:
         that: restore_target is not match('^\d{4}-\d{2}-\d{2}$')
         fail_msg: >-
-          restore_target vaut « {{ restore_target }} » — une date sans heure.
-          Si vous avez passé « -e restore_target=… » avec un espace, Ansible
-          l'a tronquée et la restauration viserait MINUIT. Utilisez la forme
-          JSON : -e '{"restore_target": "{{ restore_target }} 00:00:00+00"}',
-          en indiquant l'heure voulue.
+          restore_target is "{{ restore_target }}" — a date with no time.
+          If you passed `-e restore_target=…` containing a space, Ansible
+          truncated it and the restore would target MIDNIGHT. Use the JSON
+          form: -e '{"restore_target": "{{ restore_target }} 00:00:00+00"}',
+          with the time you actually mean.
 
-    - name: "Modules à restaurer"
+    - name: Modules to restore
       ansible.builtin.set_fact:
         _mods: >-
           {{ (restore_modules | length > 0)
              | ternary(restore_modules.split(','), ciso_backup_expect_stanzas) }}
 
-    - name: "Ce qui va être fait"
+    - name: What is about to happen
       ansible.builtin.debug:
         msg: >-
-          Restauration depuis le dépôt {{ restore_repo }}
-          (cible « {{ restore_target }} ») sur {{ inventory_hostname }},
-          modules : {{ _mods | join(', ') }}.
+          Restoring from repository {{ restore_repo }}
+          (target "{{ restore_target }}") on {{ inventory_hostname }},
+          modules: {{ _mods | join(', ') }}.
 
   roles:
-    # Installe la suite si elle n'est pas là, converge si elle l'est. Les
-    # bases démarrent vides sur un hôte neuf — c'est attendu, la restauration
-    # les remplit ensuite.
+    # Installs the suite if absent, converges if present. The databases start
+    # empty on a fresh host — that is expected, the restore fills them next.
     - { role: ciso_stack, tags: [stack] }
 
   post_tasks:
-    # L'ordre compte. Restaurer sous une base en service corromprait le
-    # répertoire de données : PostgreSQL écrit pendant que pgBackRest
-    # remplace les fichiers sous ses pieds.
-    - name: "Arrêter les applicatifs et les bases visées"
+    # Order matters. Restoring under a running database would corrupt the
+    # data directory: PostgreSQL writes while pgBackRest replaces the files
+    # underneath it.
+    - name: Stop the targeted applications and databases
       ansible.builtin.command:
         cmd: "docker compose stop {{ item }}-app {{ item }}-db"
         chdir: "{{ ciso_deploy_dir }}"
       loop: "{{ _mods }}"
       changed_when: true
 
-    # La restauration tourne dans le conteneur de BASE, pas dans l'agent :
-    # l'agent monte les répertoires de données en LECTURE SEULE — c'est
-    # délibéré, il n'a qu'à les lire pour sauvegarder. Y restaurer échoue sur
-    # « unable to remove '/pg/<m>/global/pg_control': Read-only file system ».
-    # Le conteneur de base, lui, monte son PGDATA en écriture et porte déjà
-    # toute la configuration pgBackRest par variables d'environnement.
+    # The restore runs in the DATABASE container, not in the agent: the agent
+    # mounts the data directories READ-ONLY — deliberately, it only needs to
+    # read them to back up. Restoring there fails with
+    # "unable to remove '/pg/<m>/global/pg_control': Read-only file system".
+    # The database container mounts its PGDATA writable and already carries
+    # the whole pgBackRest configuration through environment variables.
     #
-    # --delta compare les fichiers plutôt que de tout retélécharger : sur un
-    # hôte neuf il n'y a rien à comparer, mais sur une reprise partielle il
-    # évite de rapatrier des gigaoctets déjà présents.
-    - name: "Restaurer chaque base"
+    # --delta compares files instead of re-downloading everything: on a fresh
+    # host there is nothing to compare, but on a partial recovery it avoids
+    # pulling back gigabytes that are already there.
+    - name: Restore each database
       ansible.builtin.command:
         argv: >-
           {{ ['docker', 'compose', 'run', '--rm', '--no-deps',
@@ -118,25 +117,25 @@
       loop: "{{ _mods }}"
       changed_when: true
 
-    - name: "Redémarrer les bases"
+    - name: Restart the databases
       ansible.builtin.command:
         cmd: "docker compose start {{ item }}-db"
         chdir: "{{ ciso_deploy_dir }}"
       loop: "{{ _mods }}"
       changed_when: true
 
-    # Une restauration à un instant antérieur à une migration laisse un
-    # schéma en retard sur le code. Les modules appliquent Alembic à leur
-    # démarrage : les relancer APRÈS les bases suffit, mais il faut vérifier
-    # que ça s'est bien passé — d'où la trace ci-dessous.
-    - name: "Redémarrer les applicatifs"
+    # A restore to a point in time before a migration leaves the schema
+    # behind the code. Modules apply Alembic when they start: restarting them
+    # AFTER the databases is enough, but it must be verified — hence the
+    # trace below.
+    - name: Restart the applications
       ansible.builtin.command:
         cmd: "docker compose start {{ item }}-app"
         chdir: "{{ ciso_deploy_dir }}"
       loop: "{{ _mods }}"
       changed_when: true
 
-    - name: "Attendre que les services soient sains"
+    - name: Wait for the services to become healthy
       ansible.builtin.shell:
         cmd: >-
           docker compose ps --format '{% raw %}{{.Service}} {{.Health}}{% endraw %}'
@@ -148,7 +147,7 @@
       delay: 10
       changed_when: false
 
-    - name: "Révision de schéma après restauration"
+    - name: Schema revision after the restore
       ansible.builtin.command:
         cmd: >-
           docker compose exec -T {{ item }}-db
@@ -160,15 +159,15 @@
       changed_when: false
       failed_when: false
 
-    - name: "État restauré"
+    - name: Restored state
       ansible.builtin.debug:
         msg: >-
-          {{ item.item }} : schéma {{ item.stdout | default('?') | trim }}
-          {{ '— ÉCHEC de lecture, base non restaurée ?' if item.rc != 0 else '' }}
+          {{ item.item }}: schema {{ item.stdout | default('?') | trim }}
+          {{ '— READ FAILED, database not restored?' if item.rc != 0 else '' }}
       loop: "{{ _revs.results }}"
       loop_control:
         label: "{{ item.item }}"
 
-    - name: "Contrôle des sauvegardes"
+    - name: Backup checks
       ansible.builtin.include_role:
         name: backup_verify

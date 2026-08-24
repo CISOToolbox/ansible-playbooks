@@ -1,15 +1,15 @@
 ---
-- name: "Vérifier la distribution (Ubuntu 24.04 LTS attendu)"
+- name: Check the distribution (Ubuntu 24.04 LTS expected)
   ansible.builtin.assert:
     that:
       - ansible_distribution == "Ubuntu"
       - ansible_distribution_version is version("24.04", ">=")
     fail_msg: >-
-      Ce rôle cible Ubuntu 24.04 LTS ({{ ansible_distribution }}
-      {{ ansible_distribution_version }} détecté). Les noms de paquets et
-      les dépôts Docker diffèrent ailleurs.
+      This role targets Ubuntu 24.04 LTS ({{ ansible_distribution }}
+      {{ ansible_distribution_version }} detected). Package names and the
+      Docker repositories differ elsewhere.
 
-- name: "Paquets système requis"
+- name: Required system packages
   ansible.builtin.apt:
     name:
       - ca-certificates
@@ -18,34 +18,34 @@
       - gnupg
       - unattended-upgrades
       - fail2ban
-      - python3-requests      # requis par community.docker
+      - python3-requests      # required by community.docker
     state: present
     update_cache: true
     cache_valid_time: 3600
 
-# `state: present` sans autre attribut : si le compte existe déjà — cas d'un
-# compte de service géré ailleurs — on ne touche NI à son shell, NI à ses
-# groupes, NI à son home. Les imposer ici reviendrait à reconfigurer par
-# effet de bord un compte dont ce rôle n'est pas propriétaire.
-- name: "Utilisateur de déploiement"
+# `state: present` and nothing else: if the account already exists — a service
+# account managed elsewhere — we touch NEITHER its shell, NOR its groups, NOR
+# its home. Forcing them here would reconfigure, as a side effect, an account
+# this role does not own.
+- name: Deployment user
   ansible.builtin.user:
     name: "{{ ciso_deploy_user }}"
     state: present
 
-- name: "Mises à jour de sécurité automatiques"
+- name: Automatic security updates
   ansible.builtin.service:
     name: unattended-upgrades
     state: started
     enabled: true
-  # En --check le paquet n'est que simulé : l'unité systemd n'existe pas
-  # encore et la tâche échouerait sur une conséquence de la simulation.
+  # Under --check the package is only simulated: the systemd unit does not
+  # exist yet and the task would fail on a consequence of the simulation.
   when: not ansible_check_mode
 
-- name: "fail2ban actif"
+- name: fail2ban running
   ansible.builtin.service:
     name: fail2ban
     state: started
     enabled: true
-  # En --check le paquet n'est que simulé : l'unité systemd n'existe pas
-  # encore et la tâche échouerait sur une conséquence de la simulation.
+  # Under --check the package is only simulated: the systemd unit does not
+  # exist yet and the task would fail on a consequence of the simulation.
   when: not ansible_check_mode

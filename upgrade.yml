@@ -1,33 +1,33 @@
 ---
-# Montée vers une autre release de suite.
+# Upgrade to another suite release.
 #
-#   1. changer ciso_suite_version dans group_vars/all.yml
+#   1. change ciso_suite_version in group_vars/all/main.yml
 #   2. ansible-playbook upgrade.yml
 #
-# Ce playbook fait ce que site.yml fait, plus les contrôles qui n'ont de sens
-# que lors d'une mise à jour. Il refuse de tourner sans sauvegarde préalable :
-# les migrations Alembic ne sont pas réversibles.
-- name: "CISO Toolbox — montée de version"
+# This playbook does what site.yml does, plus the checks that only make sense
+# during an update. It refuses to run without a prior backup: Alembic
+# migrations are not reversible.
+- name: "CISO Toolbox — upgrade"
   hosts: ciso
   become: true
-  # Collecte NÉCESSAIRE : ansible_date_time horodate les dumps. Sans elle, la
-  # toute première tâche utile échoue sur une variable indéfinie.
+  # Fact gathering is REQUIRED: ansible_date_time timestamps the dumps.
+  # Without it, the very first useful task fails on an undefined variable.
   gather_facts: true
 
   pre_tasks:
-    - name: "Version actuellement déployée"
+    - name: Currently deployed version
       ansible.builtin.command:
         cmd: git -C "{{ ciso_deploy_dir }}/suite" describe --tags --exact-match
       register: _current
       changed_when: false
       failed_when: false
 
-    - name: "Version — de … vers …"
+    - name: Version — from … to …
       ansible.builtin.debug:
         msg: "{{ _current.stdout | default('inconnue', true) }} → {{ ciso_suite_version }}"
 
-    # 0700 root : un dump contient l'intégralité des bases en clair.
-    - name: "Répertoire des dumps"
+    # 0700 root: a dump contains every database in the clear.
+    - name: Dumps directory
       ansible.builtin.file:
         path: "{{ ciso_deploy_dir }}/dumps"
         state: directory
@@ -35,9 +35,9 @@
         group: root
         mode: "0700"
 
-    # Une migration Alembic ne se rejoue pas à l'envers. Sans dump, un
-    # échec en cours de mise à jour ne laisse aucun retour en arrière.
-    - name: "Dump de sécurité de chaque base"
+    # An Alembic migration does not replay backwards. Without a dump, a
+    # failure mid-update leaves no way back.
+    - name: Safety dump of every database
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
@@ -50,29 +50,29 @@
       failed_when: _dumps.rc != 0
       changed_when: true
 
-    - name: "Dumps produits"
+    - name: Dumps produced
       ansible.builtin.find:
         paths: "{{ ciso_deploy_dir }}/dumps"
         patterns: "*-{{ ansible_date_time.date }}.sql.gz"
-        size: 1k          # un dump vide signale une base injoignable
+        size: 1k          # an empty dump signals an unreachable database
       register: _dump_files
 
-    - name: "Refuser la mise à jour si un dump est vide ou manquant"
+    - name: Refuse the update if a dump is empty or missing
       ansible.builtin.assert:
         that: _dump_files.files | length == ciso_backup_expect_stanzas | length
         fail_msg: >-
-          {{ _dump_files.files | length }} dump(s) exploitable(s) pour
-          {{ ciso_backup_expect_stanzas | length }} base(s) attendue(s).
-          Mise à jour interrompue — sans sauvegarde, une migration ratée
-          serait sans retour.
+          {{ _dump_files.files | length }} usable dump(s) for
+          {{ ciso_backup_expect_stanzas | length }} expected database(s).
+          Update aborted — without a backup, a failed migration would be
+          irreversible.
 
   roles:
     - { role: ciso_stack, tags: [stack] }
 
   post_tasks:
-    # Les migrations s'appliquent au démarrage du conteneur. Si elles ont
-    # échoué, le module tourne sur un schéma qui ne correspond pas au code.
-    - name: "Migrations appliquées au démarrage"
+    # Migrations apply when the container starts. If they failed, the module
+    # runs on a schema that does not match its code.
+    - name: Migrations applied at startup
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
@@ -84,14 +84,14 @@
       register: _migrations
       changed_when: false
 
-    - name: "Trace des migrations"
+    - name: Migration trace
       ansible.builtin.debug:
         msg: "{{ item.item }} : {{ item.stdout_lines | default(['(aucune)']) }}"
       loop: "{{ _migrations.results }}"
       loop_control:
         label: "{{ item.item }}"
 
-    - name: "Erreurs applicatives depuis la mise à jour"
+    - name: Application errors since the update
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
@@ -102,13 +102,13 @@
       register: _errors
       changed_when: false
 
-    - name: "Alerte sur erreurs au démarrage"
+    - name: Alert on startup errors
       ansible.builtin.debug:
         msg: >-
-          {{ _errors.stdout | trim }} ligne(s) d'erreur dans les logs depuis
-          la mise à jour — inspecter avec : docker compose logs --since 10m
+          {{ _errors.stdout | trim }} error line(s) in the logs since the
+          update — inspect with: docker compose logs --since 10m
       when: (_errors.stdout | trim | int) > 0
 
-    - name: "Contrôle des sauvegardes"
+    - name: Backup checks
       ansible.builtin.include_role:
         name: backup_verify

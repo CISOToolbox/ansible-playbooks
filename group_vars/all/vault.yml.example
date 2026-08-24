@@ -1,16 +1,16 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────
-# Secrets — à chiffrer :  ansible-vault encrypt group_vars/all.vault.yml
+# Secrets — encrypt with:  ansible-vault encrypt group_vars/all/vault.yml
 #
-# Générer chaque valeur avec :  openssl rand -hex 32
+# Generate each value with:  openssl rand -hex 32
 #
-# ATTENTION à deux d'entre eux :
-#   vault_encryption_key  chiffre les secrets stockés en base (SMTP, clés IA,
-#                         jetons de connecteurs). Le CHANGER rend illisible
-#                         tout ce qui a été chiffré avec l'ancien.
-#   vault_backup_cipher   chiffre le dépôt pgBackRest. Le perdre rend les
-#                         sauvegardes irrécupérables — le conserver hors de
-#                         la machine sauvegardée.
+# TWO of them deserve special care:
+#   vault_encryption_key  encrypts the secrets stored in the database (SMTP,
+#                         AI keys, connector tokens). CHANGING it makes
+#                         everything encrypted with the old one unreadable.
+#   vault_backup_cipher   encrypts the pgBackRest repository. Losing it makes
+#                         the backups unrecoverable — keep it somewhere other
+#                         than the machine being backed up.
 # ─────────────────────────────────────────────────────────────────────────
 vault_db_password:       "change-me"
 vault_jwt_secret:        "change-me"
@@ -19,10 +19,21 @@ vault_encryption_key:    "change-me"
 vault_backup_cipher:     "change-me"
 vault_backup_agent_token: "change-me"
 
-# Fournisseur d'identité (laisser vide pour AUTH_MODE=none, test uniquement)
+# Identity provider (leave empty for AUTH_MODE=none, testing only)
 vault_entra_client_id:     ""
 vault_entra_client_secret: ""
 vault_entra_tenant_id:     "common"
 
-# Registre, uniquement si des images client privées sont déployées
+# Registry, only when private client images are deployed
 vault_registry_password: ""
+
+# Off-site S3 backup — see ciso_backup_s3 in group_vars/all/main.yml.
+# cipher_pass is optional and falls back to vault_backup_cipher. Prefer a
+# distinct one: the off-site repository is exposed to a third party (the
+# storage provider) where the local repository is not, and separate keys let
+# you entrust one without the other. LOSING IT MAKES THE OFF-SITE BACKUPS
+# UNRECOVERABLE.
+# ciso_backup_s3_secret:
+#   key: ""
+#   key_secret: ""
+#   cipher_pass: ""

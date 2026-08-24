@@ -1,10 +1,11 @@
 ---
-# Copier en inventory/hosts.yml (gitignoré : il porte adresses et accès SSH).
+# Copy to inventory/hosts.yml (gitignored: it carries addresses and SSH
+# access details).
 all:
   children:
     ciso:
       hosts:
-        exemple-host:                           # → host_vars/exemple-host.yml
-          ansible_host: srv.exemple.internal
+        example-host:                           # → host_vars/example-host.yml
+          ansible_host: srv.example.internal
           ansible_user: ansible
           ansible_ssh_private_key_file: ~/.ssh/id_ed25519

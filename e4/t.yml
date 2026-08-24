@@ -1,6 +1,0 @@
-- hosts: localhost
-  connection: local
-  become: false
-  gather_facts: false
-  vars: {ciso_env: {A: "1"}, vault_env: {}}
-  tasks: [{template: {src: env.j2, dest: "o.env"}}]

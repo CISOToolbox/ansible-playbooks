@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
-# Convertit un .env existant en fragments group_vars, pour reprendre un
-# déploiement sous Ansible SANS régénérer aucun secret.
+# Converts an existing .env into group_vars fragments, so an existing
+# deployment can be taken over by Ansible WITHOUT regenerating any secret.
 #
-#   bash extract-env.sh /chemin/vers/.env
+#   bash extract-env.sh /path/to/.env
 #
-# Produit deux fichiers dans le répertoire courant :
-#   ciso_env.yml         valeurs non secrètes  → à fusionner dans group_vars/all.yml
-#   vault_env.yml        valeurs secrètes      → à chiffrer (ansible-vault encrypt)
+# Produces two files in the current directory:
+#   ciso_env.yml         non-secret values  → merge into group_vars/all/main.yml
+#   vault_env.yml        secret values      → encrypt (ansible-vault encrypt)
 #
-# Les valeurs sont reprises TELLES QUELLES. C'est l'objectif : ENCRYPTION_KEY
-# déchiffre ce qui est déjà en base, DB_PASSWORD est celui inscrit dans le
-# volume PostgreSQL depuis l'initdb, BACKUP_CIPHER_PASS ouvre le dépôt
-# pgBackRest existant. En régénérer une seule casse le déploiement.
+# Values are taken AS THEY ARE. That is the point: ENCRYPTION_KEY decrypts
+# what is already in the database, DB_PASSWORD is the one written into the
+# PostgreSQL volume at initdb time, BACKUP_CIPHER_PASS opens the existing
+# pgBackRest repository. Regenerating a single one breaks the deployment.
 #
-# N'affiche aucun secret : seuls les NOMS des clés sont journalisés.
+# No secret is printed: only the NAMES of the keys are logged.
 set -uo pipefail
 
 SRC="${1:-.env}"
-[ -r "$SRC" ] || { echo "!! fichier illisible : $SRC" >&2; exit 1; }
+[ -r "$SRC" ] || { echo "!! unreadable file: $SRC" >&2; exit 1; }
 
 python3 - "$SRC" <<'PY'
 import re, sys, pathlib
 
 src = pathlib.Path(sys.argv[1])
 
-# Est secret tout ce qui nomme un identifiant. Le doute profite au secret :
-# une valeur non sensible classée secrète ne coûte qu'un chiffrement inutile,
-# l'inverse publie un mot de passe dans un dépôt git.
+# Anything naming a credential is a secret. When in doubt, treat it as one:
+# a non-sensitive value classified as secret costs one useless encryption,
+# the opposite publishes a password in a git repository.
 SECRET = re.compile(
     r"(PASSWORD|SECRET|TOKEN|_KEY$|API_KEY|CIPHER|ENCRYPTION_KEY|CLIENT_SECRET)")
 
-# Trappe de secours dev qu'aucun code ne lit plus, mais dont le nom seul
-# est une remarque d'audit assurée. Non reprise.
+# A development escape hatch no code reads any more, but whose name alone is
+# a guaranteed audit finding. Not carried over.
 DROP = {"SURFACE_ALLOW_NO_AUTH"}
 
 public, secret, dropped, orphans = {}, {}, [], []
@@ -40,10 +40,10 @@ for num, raw in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
     if not line or line.startswith("#"):
         continue
     if "=" not in line:
-        # Ligne sans « = » : presque toujours la suite d'une valeur coupée par
-        # un retour à la ligne. L'ignorer en silence tronquerait le secret
-        # sans que personne ne s'en aperçoive — c'est arrivé sur un
-        # JWT_SECRET en production. On la signale, on ne devine pas.
+        # A line without "=" is almost always the continuation of a value cut
+        # by a newline. Ignoring it silently would truncate the secret with
+        # nobody noticing — that happened to a JWT_SECRET in production. We
+        # report it; we do not guess.
         orphans.append((num, line[:12] + "…"))
         continue
     key, _, value = line.partition("=")
@@ -64,40 +64,39 @@ def dump(path, root, data):
 dump("ciso_env.yml", "ciso_env", public)
 dump("vault_env.yml", "vault_env", secret)
 
-print(f"ciso_env.yml   : {len(public)} clé(s) — {', '.join(sorted(public))}")
+print(f"ciso_env.yml   : {len(public)} key(s) — {', '.join(sorted(public))}")
 print()
-print(f"vault_env.yml  : {len(secret)} clé(s) — {', '.join(sorted(secret))}")
+print(f"vault_env.yml  : {len(secret)} key(s) — {', '.join(sorted(secret))}")
 if dropped:
     print()
-    print(f"NON reprises   : {', '.join(dropped)}")
+    print(f"NOT carried over : {', '.join(dropped)}")
 if orphans:
     print()
-    print("!! LIGNES SANS « = » — valeur probablement coupée par un retour à la ligne :")
-    for num, extrait in orphans:
-        print(f"     ligne {num} : {extrait}")
-    print("   La clé qui précède est donc TRONQUÉE dans l'extraction.")
-    print("   Corrigez le .env source, ou régénérez la valeur si elle le permet.")
+    print("!! LINES WITHOUT \"=\" — a value was probably cut by a newline:")
+    for num, extract in orphans:
+        print(f"     line {num}: {extract}")
+    print("   The key just above it is therefore TRUNCATED in the extraction.")
+    print("   Fix the source .env, or regenerate the value if that is safe.")
     sys.exit(3)
 PY
 rc=$?
 if [ "$rc" -ne 0 ]; then
-    # Extraction incomplète : ne pas enchaîner sur les instructions de reprise,
-    # elles donneraient l'impression que le résultat est exploitable.
+    # Incomplete extraction: do not print the follow-up instructions, they
+    # would suggest the result is usable.
     echo
-    echo "!! Extraction INTERROMPUE — corrigez le .env source puis relancez." >&2
+    echo "!! Extraction ABORTED — fix the source .env and run again." >&2
     exit "$rc"
 fi
 
 cat <<'EOF'
 
-Suite :
-  1. relire ciso_env.yml (ne doit contenir AUCUN secret)
-  2. fusionner son contenu dans group_vars/all/main.yml
+Next:
+  1. read ciso_env.yml (it must contain NO secret)
+  2. merge its contents into group_vars/all/main.yml
   3. mv vault_env.yml group_vars/all/vault.yml
      ansible-vault encrypt group_vars/all/vault.yml
-     ATTENTION : la forme REPERTOIRE (group_vars/all/) est
-     obligatoire. Un fichier group_vars/all.vault.yml ne serait
-     jamais chargé — Ansible associe un fichier au groupe portant
-     exactement son nom, et « all.vault » n'est pas « all ».
-  4. shred -u ciso_env.yml   (une fois recopié)
+     NOTE: the DIRECTORY form (group_vars/all/) is mandatory. A file named
+     group_vars/all.vault.yml would never be loaded — Ansible matches a file
+     to the group bearing exactly its name, and "all.vault" is not "all".
+  4. shred -u ciso_env.yml   (once copied over)
 EOF

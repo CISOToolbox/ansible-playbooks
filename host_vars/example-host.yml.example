@@ -1,37 +1,38 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────
-# EXEMPLE de fichier d'hôte — à copier sous host_vars/<nom-de-l-hote>.yml,
-# où <nom-de-l-hote> est EXACTEMENT le nom utilisé dans l'inventaire.
+# EXAMPLE host file — copy it to host_vars/<host-name>.yml, where
+# <host-name> is EXACTLY the name used in the inventory.
 #
-# Ce fichier porte le suffixe .example : Ansible ne le charge pas, et il
-# n'entrera donc jamais en conflit avec votre configuration réelle lors
-# d'une mise à jour du template.
+# This file carries the .example suffix: Ansible does not load it, so it will
+# never conflict with your real configuration when the template is updated.
 #
-# Le cas illustré est le plus délicat : la REPRISE d'un déploiement
-# existant, où trois valeurs ne se changent pas sans casse.
+# The case illustrated is the trickiest one: TAKING OVER an existing
+# deployment, where three values cannot be changed without breaking it.
 # ─────────────────────────────────────────────────────────────────────────
 
-# Déplacé hors de /home : les volumes portent le nom de PROJET, pas celui
-# du répertoire, donc les données suivent. Séquence de bascule dans le
-# README, section « Déplacer un déploiement existant ».
+# Moved out of /home: volumes are named after the PROJECT, not the directory,
+# so the data follows. The switch-over sequence is in the README, section
+# "Moving an existing deployment".
 ciso_deploy_dir: "/opt/ciso-toolbox"
-# Compte de service, pas un compte personnel : le déploiement ne doit pas
-# dépendre d'une personne. Il possède l'arborescence ; les commandes docker
-# tournent en root via become, donc il n'est PAS dans le groupe docker.
-# Compte propriétaire du déploiement. Le défaut du template est « ciso », un
-# compte de service dédié créé par le rôle common. Le pointer sur un compte
-# existant — celui avec lequel Ansible se connecte, par exemple — est un choix
-# valable pour un hôte déjà exploité : le rôle ne touche alors ni au shell, ni
-# aux groupes, ni au home d'un compte dont il n'est pas propriétaire.
+
+# Account owning the deployment. The template default is "ciso", a dedicated
+# service account created by the common role. Pointing it at an existing
+# account — the one Ansible connects with, for instance — is a valid choice
+# on an already-operated host: the role then touches neither the shell, nor
+# the groups, nor the home of an account it does not own.
+#
+# A service account, not a personal one: the deployment must not depend on a
+# person. It owns the directory tree; docker commands run as root through
+# become, so it is NOT in the docker group.
 ciso_deploy_user: "ciso"
 ciso_domain: "ciso.example.com"
 ciso_http_port: 80
 ciso_https_port: 443
 
-# Version de suite déployée. Une montée se fait ICI, puis upgrade.yml.
+# Suite version deployed. An upgrade is done HERE, then upgrade.yml.
 ciso_suite_version: "v0.9.2"
 
-# Neuf modules, audit inclus.
+# Nine modules, audit included.
 ciso_modules:
   - risk
   - compliance
@@ -43,28 +44,29 @@ ciso_modules:
   - audit
   - watch
 
-# Images client : add-ons propres à une organisation, dépôts privés.
-# Laisser vide pour un déploiement standard.
+# Client images: add-ons specific to one organisation, private repositories.
+# Leave empty for a standard deployment.
 ciso_client_images: {}
 #  surface: "ghcr.io/cisotoolbox/ciso-surface-<client>:v1.0.0"
 #  access:  "ghcr.io/cisotoolbox/ciso-access-<client>:v1.0.0"
-ciso_registry_user: ""                  # + vault_registry_password si images client
+ciso_registry_user: ""            # + vault_registry_password if client images
 
-# Les certificats sont déjà sur l'hôte (certs/cert.pem, certs/key.pem) et
-# correspondent aux chemins attendus par le nginx.conf de la release.
-# Ansible vérifie leur présence sans y toucher.
+# The certificates are already on the host (certs/cert.pem, certs/key.pem)
+# and match the paths the release's nginx.conf expects. Ansible checks they
+# are there and fixes their permissions, without overwriting them.
 ciso_tls_mode: "existing"
 
-# ── Le .env ──────────────────────────────────────────────────────────────
-# Extrait de l'existant par extract-env.sh : AUCUNE valeur n'a été
-# régénérée. Remplacer ce bloc par le contenu de ciso_env.yml.
+# ── The .env ─────────────────────────────────────────────────────────────
+# Extracted from the existing deployment by extract-env.sh: NO value was
+# regenerated.
 #
-# COMPOSE_PROJECT_NAME est LA valeur critique : elle préfixe les volumes.
-# Une autre valeur ferait démarrer la stack sur des bases vides — le rôle
-# refuse désormais ce cas, mais ne le corrige pas à votre place.
-# REMPLACER TOUT LE BLOC ci-dessous par le contenu de ciso_env.yml produit
-# par extract-env.sh — il contient DÉJÀ COMPOSE_PROJECT_NAME. Le compléter
-# au lieu de le remplacer crée une clé en double : YAML retient la dernière
-# et n'émet qu'un avertissement, facile à manquer dans une longue sortie.
+# COMPOSE_PROJECT_NAME is THE critical value: it prefixes the volumes. A
+# different value would start the stack on empty databases — the role now
+# refuses that case, but it does not fix it for you.
+#
+# REPLACE THE WHOLE BLOCK below with the contents of ciso_env.yml produced by
+# extract-env.sh — it ALREADY contains COMPOSE_PROJECT_NAME. Adding to it
+# instead of replacing it creates a duplicate key: YAML keeps the last one
+# and only emits a warning, easy to miss in a long output.
 ciso_env:
   COMPOSE_PROJECT_NAME: "ciso"

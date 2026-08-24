@@ -1,79 +1,79 @@
 ---
 # ═══════════════════════════════════════════════════════════════════════════
-# À LIRE AVANT D'ACTIVER ufw SUR UN HÔTE DOCKER
+# READ THIS BEFORE ENABLING ufw ON A DOCKER HOST
 #
-# ufw n'arbitre PAS les ports publiés par les conteneurs. Docker écrit ses
-# propres règles : un DNAT en nat/PREROUTING puis la chaîne DOCKER atteinte
-# depuis FORWARD. Les règles d'ufw, elles, vivent dans INPUT. Un conteneur
-# démarré avec `-p 8080:8080` reste donc joignable depuis le réseau MÊME avec
-# une politique `deny incoming` active, et sans aucune règle `allow`.
+# ufw does NOT arbitrate ports published by containers. Docker writes its own
+# rules: a DNAT in nat/PREROUTING, then the DOCKER chain reached from FORWARD.
+# ufw's rules live in INPUT. A container started with `-p 8080:8080` therefore
+# stays reachable from the network EVEN with a `deny incoming` policy active,
+# and without any `allow` rule.
 #
-# Conséquence concrète pour cette stack : seul le port 22 est réellement
-# gouverné par ufw. Les 80/443 du proxy sont publiés par Docker — les
-# autoriser ici ne change rien, et les refuser ne les fermerait pas.
+# Concretely for this stack: only port 22 is really governed by ufw. The
+# proxy's 80/443 are published by Docker — allowing them here changes
+# nothing, and denying them would not close them.
 #
-# Fermer un port publié demande la chaîne DOCKER-USER, que Docker consulte
-# avant ses propres règles et ne réécrit jamais. Ce rôle ne va pas jusque-là :
-# le faire correctement suppose de connaître les réseaux de confiance de
-# l'établissement. Ne publiez que ce qui doit l'être — c'est le vrai levier.
+# Closing a published port requires the DOCKER-USER chain, which Docker
+# consults before its own rules and never rewrites. This role does not go
+# that far: doing it correctly means knowing the organisation's trusted
+# networks. Publish only what must be published — that is the real lever.
 # ═══════════════════════════════════════════════════════════════════════════
 
-- name: "ufw installé ?"
+- name: Is ufw installed?
   ansible.builtin.command: which ufw
   register: _ufw_bin
   changed_when: false
   failed_when: false
-  check_mode: false      # lecture seule : doit tourner aussi en --check
+  check_mode: false      # read-only: must run under --check too
 
-- name: "ufw"
+- name: ufw
   ansible.builtin.package:
     name: ufw
     state: present
   when: ciso_firewall_manage | bool
 
-# Défini AVANT toute tâche qui s'en sert — une variable manquante fait échouer
-# la condition elle-même, pas la tâche.
-- name: "ufw est-il configurable ici ?"
+# Defined BEFORE any task that uses it — a missing variable fails the
+# condition itself, not the task.
+- name: Can ufw be configured here?
   ansible.builtin.set_fact:
     _configurable: >-
       {{ (ciso_firewall_manage | bool)
          and (_ufw_bin.rc == 0 or not ansible_check_mode) }}
 
-# En --check l'installation n'est que simulée : le binaire n'existe pas et le
-# module ufw échouerait sur une conséquence de la simulation, pas sur un
-# défaut de configuration. On saute alors, en le disant.
-- name: "Configuration ufw non simulable (--check, ufw absent)"
+# Under --check the installation above is only simulated: the binary does not
+# exist and the ufw module would fail on a consequence of the simulation, not
+# on a configuration defect. So we skip, and say so.
+- name: ufw configuration not simulatable (--check, ufw absent)
   ansible.builtin.debug:
     msg: >-
-      ufw n'est pas installé sur l'hôte et --check ne l'installe pas :
-      les règles ne peuvent pas être évaluées ici. Une exécution réelle
-      installera ufw puis appliquera les règles dans le bon ordre.
+      ufw is not installed on the host and --check will not install it:
+      the rules cannot be evaluated here. A real run will install ufw and
+      then apply the rules in the right order.
   when:
     - ciso_firewall_manage | bool
     - not (_configurable | bool)
 
-# Ubuntu livre DEFAULT_FORWARD_POLICY="DROP". Or la sortie d'un conteneur vers
-# l'extérieur passe par FORWARD : Surface qui scanne, Watch qui tire les flux
-# CVE, le relais SMTP, `docker compose pull`. Docker pose des règles ACCEPT
-# au-dessus des chaînes d'ufw, donc activer ufw ne casse rien SUR LE MOMENT —
-# la panne arrive au premier `ufw reload` ou `systemctl restart ufw`, qui
-# réinsère les chaînes d'ufw en tête. Des semaines plus tard, sans rapport
-# apparent avec sa cause.
+# Ubuntu ships DEFAULT_FORWARD_POLICY="DROP". But a container's outbound
+# traffic goes through FORWARD: Surface scanning, Watch pulling CVE feeds,
+# the SMTP relay, `docker compose pull`. Docker installs ACCEPT rules above
+# ufw's chains, so enabling ufw breaks nothing AT THE TIME — the outage
+# arrives at the first `ufw reload` or `systemctl restart ufw`, which
+# reinserts ufw's chains on top. Weeks later, with no apparent link to its
+# cause.
 #
-# On passe donc la politique à ACCEPT et on laisse Docker arbitrer le trafic
-# forwardé — ce qu'il fait de toute façon, ufw n'ayant aucune prise dessus.
-# Cela ne relâche rien : c'est écrire ce qui est déjà vrai, au lieu de laisser
-# un DROP inopérant qui deviendra opérant au pire moment.
-- name: "ufw — ne pas casser le trafic sortant des conteneurs"
+# So we set the policy to ACCEPT and let Docker arbitrate forwarded traffic —
+# which it does anyway, ufw having no grip on it. This relaxes nothing: it
+# writes down what is already true, instead of leaving an inoperative DROP
+# that will become operative at the worst possible moment.
+- name: ufw — do not break container outbound traffic
   ansible.builtin.lineinfile:
     path: /etc/default/ufw
     regexp: '^DEFAULT_FORWARD_POLICY='
     line: 'DEFAULT_FORWARD_POLICY="ACCEPT"'
   when: _configurable | bool
 
-# L'ordre compte : autoriser AVANT d'activer, sinon `ufw enable` coupe la
-# session SSH en cours et l'hôte devient injoignable.
-- name: "ufw — autoriser les ports de service"
+# Order matters: allow BEFORE enabling, otherwise `ufw enable` cuts the
+# current SSH session and the host becomes unreachable.
+- name: ufw — allow service ports
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
@@ -81,7 +81,7 @@
   loop: "{{ ciso_firewall_ports }}"
   when: _configurable | bool
 
-- name: "ufw — politique par défaut"
+- name: ufw — default policy
   community.general.ufw:
     direction: "{{ item.direction }}"
     policy: "{{ item.policy }}"
@@ -90,15 +90,15 @@
     - { direction: outgoing, policy: allow }
   when: _configurable | bool
 
-- name: "ufw — activé"
+- name: ufw — enabled
   community.general.ufw:
     state: enabled
   when: _configurable | bool
 
-- name: "Pare-feu hôte non géré par Ansible"
+- name: Host firewall not managed by Ansible
   ansible.builtin.debug:
     msg: >-
-      ciso_firewall_manage=false : le pare-feu de l'hôte est laissé tel quel.
-      Vérifiez qu'un filtrage existe en amont (groupe de sécurité, pare-feu
-      d'hyperviseur) et que seul le nécessaire est exposé.
+      ciso_firewall_manage=false: the host firewall is left as it is.
+      Check that filtering exists upstream (cloud security group, hypervisor
+      firewall) and that only what must be exposed is exposed.
   when: not (ciso_firewall_manage | bool)

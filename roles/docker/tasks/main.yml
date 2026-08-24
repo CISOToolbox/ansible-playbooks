@@ -1,41 +1,41 @@
 ---
-# Deux sources possibles, pilotées par `ciso_docker_source` :
+# Two possible sources, driven by `ciso_docker_source`:
 #
-#   distro (défaut) — docker.io + docker-compose-v2 + docker-buildx, paquets
-#     Ubuntu. Sur 24.04 ils sont à jour (docker.io 29.x, compose 2.40.x) :
-#     l'argument historique « la distribution est en retard et n'a pas
-#     compose v2 » ne vaut plus. Ils sont signés par Ubuntu, suivis par
-#     unattended-upgrades, et n'ajoutent aucun dépôt tiers.
+#   distro (default) — docker.io + docker-compose-v2 + docker-buildx, Ubuntu
+#     packages. On 24.04 they are current (docker.io 29.x, compose 2.40.x):
+#     the historical argument "the distribution lags and has no compose v2"
+#     no longer holds. They are signed by Ubuntu, covered by
+#     unattended-upgrades, and add no third-party repository.
 #
-#   docker-ce — dépôt officiel Docker Inc. À choisir si une version amont
-#     précise est requise. Ajoute une clé et un dépôt tiers à la chaîne
-#     d'approvisionnement de l'hôte.
+#   docker-ce — Docker Inc.'s official repository. Choose it when a precise
+#     upstream version is required. It adds a third-party key and repository
+#     to the host's supply chain.
 #
-# Dans les deux cas, un Docker déjà opérationnel n'est jamais remplacé :
-# docker-ce et docker.io sont en conflit, et basculer de l'un à l'autre
-# arrête les conteneurs en service.
+# In both cases, a working Docker installation is never replaced: docker-ce
+# and docker.io conflict, and switching from one to the other stops the
+# containers in service.
 
-# Un hôte qui tourne déjà peut avoir Docker par un autre chemin — le paquet
-# docker.io d'Ubuntu, typiquement. Or docker-ce et docker.io sont en CONFLIT :
-# installer l'un désinstalle l'autre, ce qui arrêterait les conteneurs en
-# service. Un rôle d'installation ne doit pas faire ça sur une production.
-# On détecte donc l'existant et on ne touche à rien s'il fait l'affaire.
-- name: "Docker et compose v2 sont-ils déjà opérationnels ?"
+# A running host may already have Docker from another path — Ubuntu's
+# docker.io package, typically. But docker-ce and docker.io CONFLICT:
+# installing one uninstalls the other, which would stop the containers in
+# service. An installation role must not do that to a production host.
+# So we detect what exists and touch nothing if it does the job.
+- name: Are Docker and compose v2 already working?
   ansible.builtin.command: docker compose version
   register: _docker_present
   changed_when: false
   failed_when: false
 
-- name: "Docker déjà en place — installation ignorée"
+- name: Docker already present — installation skipped
   ansible.builtin.debug:
     msg: >-
-      {{ _docker_present.stdout | trim }} déjà présent : le rôle n'installe
-      rien. Pour repasser sur le dépôt officiel, désinstallez d'abord la
-      version en place — opération à faire hors production, elle arrête les
-      conteneurs.
+      {{ _docker_present.stdout | trim }} already present: the role installs
+      nothing. To switch to the official repository, uninstall the current
+      version first — do it outside production hours, it stops the
+      containers.
   when: _docker_present.rc == 0
 
-- name: "Docker par les paquets de la distribution"
+- name: Docker from the distribution packages
   ansible.builtin.apt:
     name:
       - docker.io
@@ -46,14 +46,14 @@
     cache_valid_time: 3600
   when: _docker_present.rc != 0 and ciso_docker_source == "distro"
 
-- name: "Clé du dépôt Docker"
+- name: Docker repository key
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
     dest: /etc/apt/keyrings/docker.asc
     mode: "0644"
   when: _docker_present.rc != 0 and ciso_docker_source == "docker-ce"
 
-- name: "Dépôt Docker"
+- name: Docker repository
   ansible.builtin.apt_repository:
     repo: >-
       deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
@@ -63,7 +63,7 @@
     state: present
   when: _docker_present.rc != 0 and ciso_docker_source == "docker-ce"
 
-- name: "Docker CE + plugin compose"
+- name: Docker CE + compose plugin
   ansible.builtin.apt:
     name:
       - docker-ce
@@ -75,50 +75,50 @@
     update_cache: true
   when: _docker_present.rc != 0 and ciso_docker_source == "docker-ce"
 
-- name: "Service docker actif"
+- name: docker service running
   ansible.builtin.service:
     name: docker
     state: started
     enabled: true
-  # En --check le paquet n'est que simulé : l'unité systemd n'existe pas
-  # encore et la tâche échouerait sur une conséquence de la simulation.
+  # Under --check the package is only simulated: the systemd unit does not
+  # exist yet and the task would fail on a consequence of the simulation.
   when: not ansible_check_mode
 
-# Volontairement PAS d'ajout au groupe docker : y appartenir équivaut à un
-# accès root permanent sur l'hôte, et ce compte est celui qui reçoit les
-# connexions SSH. Les commandes docker tournent en root via become, ce qui
-# donne le même résultat sans privilège permanent.
+# Deliberately NO addition to the docker group: belonging to it is
+# equivalent to permanent root access on the host, and this account is the
+# one that receives SSH connections. Docker commands run as root through
+# become, which gives the same result without a standing privilege.
 
-- name: "Vérifier que compose v2 répond après installation"
+- name: Check that compose v2 answers after installation
   ansible.builtin.command: docker compose version
   register: _compose_v
   changed_when: false
   when: not ansible_check_mode and _docker_present.rc != 0
 
-- name: "Version de compose"
+- name: compose version
   ansible.builtin.debug:
     msg: "{{ _compose_v.stdout }}"
   when: not ansible_check_mode and _docker_present.rc != 0
 
-# Les images client sont privées : sans authentification, `compose pull`
-# échoue sur elles seules et laisse la stack à moitié à jour.
-# Erreur de placement fréquente : ranger vault_registry_password DANS le
-# dictionnaire vault_env. Il y serait rendu comme une variable du .env — sans
-# usage — et resterait introuvable ici, où Ansible l'attend au premier
-# niveau. Le message de Jinja ne dit pas où corriger ; celui-ci le dit.
-- name: "Le mot de passe du registre est-il au bon niveau ?"
+# Client images are private: without authentication, `compose pull` fails on
+# those alone and leaves the stack half updated.
+# A frequent misplacement: putting vault_registry_password INSIDE the
+# vault_env dictionary. There it would be rendered as a .env variable — with
+# no consumer — and stay unreachable here, where Ansible expects it at the
+# top level. Jinja's own message does not say where to fix it; this one does.
+- name: Is the registry password at the right level?
   ansible.builtin.assert:
     that: vault_registry_password is defined
     fail_msg: >-
-      Des images client sont configurées ({{ ciso_client_images.keys() | join(', ') }})
-      et ciso_registry_user vaut « {{ ciso_registry_user }} », mais
-      vault_registry_password est introuvable.
-      Il doit être une clé de PREMIER NIVEAU de group_vars/all/vault.yml,
-      SŒUR de vault_env — et non une entrée à l'intérieur de vault_env, qui
-      ne contient que les variables destinées au fichier .env.
+      Client images are configured ({{ ciso_client_images.keys() | join(', ') }})
+      and ciso_registry_user is "{{ ciso_registry_user }}", but
+      vault_registry_password cannot be found.
+      It must be a TOP-LEVEL key of group_vars/all/vault.yml, a SIBLING of
+      vault_env — not an entry inside vault_env, which holds only the
+      variables destined for the .env file.
   when: ciso_client_images | length > 0 and ciso_registry_user | length > 0
 
-- name: "Authentification au registre (images client privées)"
+- name: Registry authentication (private client images)
   community.docker.docker_login:
     registry_url: "{{ ciso_registry }}"
     username: "{{ ciso_registry_user }}"
