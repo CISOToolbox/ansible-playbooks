@@ -86,27 +86,47 @@
       failed_when: false
       when: ciso_backup_s3 | default({}) | length > 0
 
-    - name: Off-site backup present and fresh
-      ansible.builtin.assert:
-        that:
-          - item.rc == 0
-          - (item.stdout | from_json | first).backup | default([]) | length > 0
-          - ((item.stdout | from_json | first).backup
-             | map(attribute='timestamp.stop') | list | max | int)
-            > (lookup('pipe', 'date +%s') | int)
-              - (ciso_backup_s3_max_age_days | default(3) | int) * 86400
-        fail_msg: >-
-          {{ item.item }}: no usable off-site backup.
-          {{ "The info command failed (rc=" ~ item.rc ~ ") — " ~ (item.stderr | default(''))[:200]
-             if item.rc != 0
-             else ((item.stdout | from_json | first).backup | default([]) | length == 0)
-                  | ternary("the stanza exists but holds no backup: the recovery window is not open off-site.",
-                            "the newest off-site backup is older than "
-                            ~ (ciso_backup_s3_max_age_days | default(3)) ~ " days.") }}
-        success_msg: "{{ item.item }}: off-site backup up to date."
+    # Reduced to one timestamp per stanza before asserting. Asserting inside
+    # the loop made Ansible echo the whole pgbackrest JSON for every module —
+    # ten unreadable blocks to say "everything is fine", on a check meant to
+    # be run routinely. A check nobody reads is a check nobody runs.
+    #
+    # -1 marks a command that failed, 0 a stanza holding no backup at all.
+    - name: Newest off-site backup per stanza
+      ansible.builtin.set_fact:
+        _s3_newest: >-
+          {{ (_s3_newest | default({})) | combine({
+               item.item: (item.rc == 0)
+               | ternary((item.stdout | from_json | first).backup | default([])
+                         | map(attribute='timestamp.stop') | list | max | default(0), -1) }) }}
       loop: "{{ _s3_info.results | default([]) }}"
       loop_control:
         label: "{{ item.item | default('?') }}"
+      when: ciso_backup_s3 | default({}) | length > 0
+
+    - name: Off-site repository state
+      ansible.builtin.assert:
+        that:
+          - _s3_newest | dict2items | selectattr('value', 'equalto', -1) | list | length == 0
+          - _s3_newest | dict2items | selectattr('value', 'equalto', 0) | list | length == 0
+          - _s3_newest | dict2items | rejectattr('value', 'in', [0, -1])
+            | selectattr('value', 'lt', (lookup('pipe', 'date +%s') | int)
+              - (ciso_backup_s3_max_age_days | default(3) | int) * 86400)
+            | list | length == 0
+        fail_msg: >-
+          Off-site backup problem — three different remedies:
+          {% set ko = _s3_newest | dict2items | selectattr('value', 'equalto', -1) | map(attribute='key') | list %}
+          {% set vide = _s3_newest | dict2items | selectattr('value', 'equalto', 0) | map(attribute='key') | list %}
+          {% set vieux = _s3_newest | dict2items | rejectattr('value', 'in', [0, -1])
+             | selectattr('value', 'lt', (lookup('pipe', 'date +%s') | int)
+               - (ciso_backup_s3_max_age_days | default(3) | int) * 86400)
+             | map(attribute='key') | list %}
+          {{ "the info command FAILED for: " ~ (ko | join(', ')) ~ " (credentials, network, or the repository is unreachable). " if ko else "" }}
+          {{ "NO backup at all off-site for: " ~ (vide | join(', ')) ~ " (the recovery window is not open — force a full backup). " if vide else "" }}
+          {{ "older than " ~ (ciso_backup_s3_max_age_days | default(3)) ~ " days: " ~ (vieux | join(', ')) ~ " (the agent is no longer pushing off-site)." if vieux else "" }}
+        success_msg: >-
+          Off-site repository up to date for the
+          {{ _s3_newest | length }} stanza(s).
       when: ciso_backup_s3 | default({}) | length > 0
 
     - name: Backup checks
