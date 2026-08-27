@@ -264,10 +264,32 @@ local one is not. Separate keys let you entrust one without handing over the
 other. Losing it makes the off-site backups unrecoverable, exactly like
 `vault_backup_cipher` for the local repository.
 
-**Restrict the credentials to that bucket alone**, write-only if your provider
-allows it: ransomware that takes the host must not be able to erase the
-backups. Object lock on the bucket is the only real protection against that
-class of attack, and it cannot be obtained from the client side.
+**Restrict the credentials to that bucket alone** — but they must be complete
+credentials. pgBackRest needs four permissions, and a "write-only" key does
+not work:
+
+| Operation | Scope | Why |
+|---|---|---|
+| list | the **bucket** | the one that gets forgotten: it is a bucket permission, not an object one |
+| read | objects | `backup.info` is read before every backup |
+| write | objects | the backups themselves |
+| delete | objects | `expire` enforces retention |
+
+Missing the list permission produces a misleading failure: S3 answers **403 on
+an object that does not exist** rather than 404, so that a caller who may not
+list cannot learn what exists. On a fresh repository every path is missing, so
+the first call fails with `AccessDenied` and looks like a credentials problem.
+
+Protection against ransomware does not come from removing the read
+permission — it comes from **object lock** or versioning on the bucket, where
+writes stay possible and deletions are neutralised server-side.
+
+**If the bucket filters by source IP, the recovery host must be in the
+allow-list too.** A standby server built in a hurry, with a different egress
+address, is refused with the same `AccessDenied` that a permission problem
+gives — at the worst possible moment. Decide now: pre-authorise the range a
+recovery would come from, or make adding the address step one of the
+procedure.
 
 > **Internal object storage must serve HTTPS.** pgBackRest speaks TLS to an S3
 > repository. Against a plaintext endpoint the call does not fail: it *hangs*.
