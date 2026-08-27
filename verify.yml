@@ -67,56 +67,47 @@
     # credentials, a moved bucket, a retention policy imposed by the provider.
     # The local one makes itself known immediately. "Local fresh, off-site
     # behind" is therefore the failure mode to detect.
-    - name: Off-site repository freshness
-      ansible.builtin.shell:
+    #
+    # No embedded Python here. The previous version passed a one-liner to
+    # python3 through a folded YAML block: folding preserves the source
+    # indentation, python refuses it, and the check died with an
+    # IndentationError on every host — silently, because its result was only
+    # read through a `when` condition. A check that cannot run must fail, and
+    # a check should not need a second language to do its job.
+    - name: Off-site repository state per stanza
+      ansible.builtin.command:
         cmd: >-
-          docker compose exec -T backup-agent python3 -c "
-          import json,subprocess,time,sys;
-          mods='{{ ciso_backup_expect_stanzas | join(' ') }}'.split();
-          out=[];
-          [out.append((m, max([b['timestamp']['stop'] for r in
-            json.loads(subprocess.run(['pgbackrest','--stanza='+m,'--repo=2','info','--output=json'],
-            capture_output=True,text=True).stdout or '[]') for b in r['backup']] or [0])))
-            for m in mods];
-          now=time.time();
-          print('\n'.join(f'{m} {int((now-t)/86400) if t else -1}' for m,t in out))"
+          docker compose exec -T backup-agent
+          pgbackrest --stanza={{ item }} --repo=2 info --output=json
         chdir: "{{ ciso_deploy_dir }}"
-      register: _s3_age
+      loop: "{{ ciso_backup_expect_stanzas }}"
+      register: _s3_info
       changed_when: false
       failed_when: false
       when: ciso_backup_s3 | default({}) | length > 0
 
-    # A check that cannot run must say so. Skipping the assertion when the
-    # command produced nothing makes a broken check look exactly like a
-    # passing one — and this check exists precisely because the off-site
-    # repository fails silently.
-    - name: The freshness check could not run
+    - name: Off-site backup present and fresh
       ansible.builtin.assert:
-        that: _s3_age.stdout | default('') | trim | length > 0
+        that:
+          - item.rc == 0
+          - (item.stdout | from_json | first).backup | default([]) | length > 0
+          - ((item.stdout | from_json | first).backup
+             | map(attribute='timestamp.stop') | list | max | int)
+            > (lookup('pipe', 'date +%s') | int)
+              - (ciso_backup_s3_max_age_days | default(3) | int) * 86400
         fail_msg: >-
-          The off-site freshness command returned nothing (rc={{ _s3_age.rc | default('?') }}).
-          Nothing was verified — do not read this run as "backups are fine".
-          {{ (_s3_age.stderr | default(''))[:300] }}
+          {{ item.item }}: no usable off-site backup.
+          {{ "The info command failed (rc=" ~ item.rc ~ ") — " ~ (item.stderr | default(''))[:200]
+             if item.rc != 0
+             else ((item.stdout | from_json | first).backup | default([]) | length == 0)
+                  | ternary("the stanza exists but holds no backup: the recovery window is not open off-site.",
+                            "the newest off-site backup is older than "
+                            ~ (ciso_backup_s3_max_age_days | default(3)) ~ " days.") }}
+        success_msg: "{{ item.item }}: off-site backup up to date."
+      loop: "{{ _s3_info.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item | default('?') }}"
       when: ciso_backup_s3 | default({}) | length > 0
-
-    - name: Off-site repositories lagging
-      ansible.builtin.assert:
-        that: >-
-          _s3_age.stdout_lines
-          | map('regex_replace', '^\S+ ', '') | map('int')
-          | select('>', ciso_backup_s3_max_age_days | default(3))
-          | list | length == 0
-        fail_msg: >-
-          Off-site backup lagging (threshold
-          {{ ciso_backup_s3_max_age_days | default(3) }} days):
-          {{ _s3_age.stdout_lines | join(' | ') }}.
-          A "-1" means a stanza with NO backup at all on the off-site
-          repository — the protection against losing the host does not exist.
-        success_msg: >-
-          Off-site repository up to date: {{ _s3_age.stdout_lines | join(' | ') }}
-      when:
-        - ciso_backup_s3 | default({}) | length > 0
-        - _s3_age.stdout | default('') | trim | length > 0
 
     - name: Backup checks
       ansible.builtin.include_role:
