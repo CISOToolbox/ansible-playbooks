@@ -60,6 +60,19 @@
       failed_when: false
       when: ciso_backup_s3 | default({}) | length > 0
 
+    # A check that cannot run must say so. Skipping the assertion when the
+    # command produced nothing makes a broken check look exactly like a
+    # passing one — and this check exists precisely because the off-site
+    # repository fails silently.
+    - name: The freshness check could not run
+      ansible.builtin.assert:
+        that: _s3_age.stdout | default('') | trim | length > 0
+        fail_msg: >-
+          The off-site freshness command returned nothing (rc={{ _s3_age.rc | default('?') }}).
+          Nothing was verified — do not read this run as "backups are fine".
+          {{ (_s3_age.stderr | default(''))[:300] }}
+      when: ciso_backup_s3 | default({}) | length > 0
+
     - name: Off-site repositories lagging
       ansible.builtin.assert:
         that: >-
