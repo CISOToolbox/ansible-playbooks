@@ -14,6 +14,26 @@ Upgrading means changing that variable and replaying.
 Corollary: do not put `main` in `ciso_suite_version`. You would deploy a
 combination nobody has validated.
 
+## Versions
+
+Pin a tag, do not track `main` — see [CHANGELOG.md](CHANGELOG.md) for what a
+major, minor or patch means here. This repository is versioned independently
+of the suite: which suite you deploy is `ciso_suite_version`, set in your own
+inventory.
+
+Your configuration — inventory, `host_vars`, vault, certificates — belongs in
+**your** repository, not in a fork of this one. Ansible loads `group_vars/`
+and `host_vars/` from the directory of the inventory file, so the two can live
+apart:
+
+```bash
+ansible-playbook -i inventory/hosts.yml playbooks/site.yml --limit <host>
+```
+
+with this repository checked out at a tag under `playbooks/` — a git submodule
+does that, and records in your own history which version produced which
+deployment.
+
 ## The four playbooks
 
 | Playbook | When | What it adds |
