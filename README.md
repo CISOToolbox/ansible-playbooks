@@ -352,6 +352,73 @@ After restoring to a point in time before a migration, the schema may lag
 behind the code: modules apply Alembic when they start, and the playbook
 prints the revision obtained for each database.
 
+## Before you need it: what a recovery actually requires
+
+A recovery is not only a restore. Four things must be true *before* the host
+is lost, and each of them was found the hard way during a real rehearsal on a
+second machine.
+
+**The vault is the only artefact that cannot be reconstructed.** Backups hold
+database contents; they do not hold `ENCRYPTION_KEY`, `DB_PASSWORD`,
+`JWT_SECRET`, the identity-provider secrets, or the S3 credentials — and they
+could not, since those are what you need to *open* the repository. The
+encrypted `group_vars/all/vault.yml` must therefore live somewhere
+independent of the machine it protects: a password manager, a corporate
+vault, offline media. Keep it **encrypted** wherever it travels; only the
+vault password moves out of band.
+
+**The recovery host must be sized like the original.** The suite is 22
+containers, ten of them PostgreSQL. A rehearsal on a 2 GB machine failed in a
+way that pointed nowhere useful: the module containers restarted in a
+sub-second loop, exit code 0, no OOM signature, `docker stats` showing barely
+400 MB in use — because a container that dies before doing any work never
+reaches its working set. The same deployment ran cleanly at 8 GB. Discovering
+this during an actual outage would be the worst possible moment.
+
+**Build the host file with `extract-env.sh`, never by hand.** The script
+carries the whole `.env` and splits secrets from the rest. A hand-written
+file enumerating "the keys that matter" silently loses the others — in the
+rehearsal it kept 10 keys out of 34, dropping all three identity providers,
+and the recovered stack came up with no authentication. This is the same
+failure mode `env.j2` avoids by rendering dictionaries rather than a fixed
+list of names.
+
+**`host_vars` REPLACES `ciso_env`, it does not merge it.** Anything inherited
+from the `group_vars` default — `AUTH_MODE`, `APP_URL`, `PUBLIC_BASE_URL` —
+disappears the moment a host file defines its own `ciso_env`. Repeat those
+keys in the host file, or lose them without a warning.
+
+## Reading the vault password
+
+`ansible.cfg` deliberately does not set `vault_password_file`: forcing it
+there makes even `--syntax-check` fail on a freshly cloned repository. Writing
+the password to `.vault_pass` is therefore not enough on its own — point
+Ansible at it:
+
+```bash
+export ANSIBLE_VAULT_PASSWORD_FILE=.vault_pass     # for the whole shell
+ansible-playbook … --vault-password-file .vault_pass
+ansible-playbook … --ask-vault-pass                # nothing written to disk
+```
+
+And if the account needs a password for `sudo`, add `-K`: the playbooks run
+with `become: true` and `become_ask_pass = False`, so without it the very
+first task fails on `sudo: a password is required`.
+
+## Rehearsing a recovery
+
+A rehearsal differs from a real recovery in one way that matters: the
+original host is still alive. Both deployments then share the same off-site
+repository, and the restored copy's `backup-agent` will apply its own
+retention — expiring backups belonging to the source. Stop it as soon as the
+restore succeeds:
+
+```bash
+sudo docker compose stop backup-agent
+```
+
+In a real recovery the question does not arise, the old host being gone.
+
 ---
 
 # Moving an existing deployment
