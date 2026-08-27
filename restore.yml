@@ -74,6 +74,14 @@
           modules: {{ _mods | join(', ') }}.
 
   roles:
+    # The same roles as site.yml, in the same order. A recovery targets a
+    # FRESH host: the deployment account, Docker and the base packages are
+    # not there yet. Loading ciso_stack alone failed on the very first task
+    # with "chown failed: failed to look up user <account>" — the account is
+    # created by `common`, which was never reached.
+    - { role: common,   tags: [common] }
+    - { role: docker,   tags: [docker] }
+    - { role: firewall, tags: [firewall] }
     # Installs the suite if absent, converges if present. The databases start
     # empty on a fresh host — that is expected, the restore fills them next.
     - { role: ciso_stack, tags: [stack] }
