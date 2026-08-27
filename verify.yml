@@ -18,24 +18,50 @@
       ansible.builtin.debug:
         var: _ps.stdout_lines
 
+    # Certificate validation is on by default — an "existing" certificate from
+    # ACME or a corporate PKI is as valid as a provided one, and an expired or
+    # wrong certificate should be noticed here.
+    #
+    # A corporate PKI absent from the host's trust store is the exception:
+    # set ciso_verify_tls to false, or point ciso_verify_tls_ca at the CA
+    # bundle. Turning validation off blinds this check to certificate
+    # problems, so prefer the CA bundle when you have it.
     - name: HTTP response of each module through the edge
       ansible.builtin.uri:
         url: "https://{{ ciso_domain }}/{{ item }}/"
-        # An "existing" certificate comes from ACME or a corporate PKI: it is
-        # just as valid as a "provided" one. Only the self-signed case fails
-        # validation, and only it should be exempt.
-        validate_certs: "{{ ciso_tls_mode != 'selfsigned' }}"
+        validate_certs: "{{ ciso_verify_tls | default(ciso_tls_mode != 'selfsigned') }}"
+        ca_path: "{{ ciso_verify_tls_ca | default(omit) }}"
         status_code: [200, 302, 401]
       loop: "{{ ciso_modules }}"
       register: _http
       failed_when: false
       changed_when: false
 
-    - name: Unreachable modules
+    # Two failures that look alike and are not: a module that answers the
+    # wrong code is a module in trouble; a module that answers nothing at all
+    # (status -1) means the request never completed — DNS, routing, or a
+    # certificate the host does not trust. Reporting both as "unreachable"
+    # sent three diagnoses down the wrong path.
+    - name: Modules answering an unexpected code
       ansible.builtin.debug:
         msg: >-
-          {{ _http.results | rejectattr('status', 'in', [200, 302, 401])
+          {{ _http.results | selectattr('status', 'defined')
+             | rejectattr('status', 'in', [200, 302, 401, -1])
              | map(attribute='item') | list | default('none', true) }}
+
+    - name: Modules that did not answer at all
+      ansible.builtin.debug:
+        msg: >-
+          {{ _http.results | selectattr('status', 'defined')
+             | selectattr('status', 'equalto', -1) | map(attribute='item')
+             | list | default('none', true) }}
+          {{ '— the request never completed. First candidate: a certificate
+              the host does not trust (corporate PKI). ' ~
+              (_http.results | selectattr('status', 'equalto', -1)
+               | map(attribute='msg') | first | default(''))[:200]
+             if (_http.results | selectattr('status', 'defined')
+                 | selectattr('status', 'equalto', -1) | list | length > 0)
+             else '' }}
 
     # The off-site repository is the one whose failure is SILENT: expired
     # credentials, a moved bucket, a retention policy imposed by the provider.

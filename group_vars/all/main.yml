@@ -128,3 +128,10 @@ ciso_backup_s3_secret: {}
 
 # How many days the off-site repository may lag before verify.yml fails.
 ciso_backup_s3_max_age_days: 3
+
+# TLS validation for the checks in verify.yml. On by default, except in
+# selfsigned mode. Set to false when the certificate comes from a corporate
+# PKI absent from the host trust store — or better, point ciso_verify_tls_ca
+# at the CA bundle, which keeps the check able to notice a bad certificate.
+# ciso_verify_tls: false
+# ciso_verify_tls_ca: "/usr/local/share/ca-certificates/corp-root.crt"
