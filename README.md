@@ -265,61 +265,27 @@ other. Losing it makes the off-site backups unrecoverable, exactly like
 `vault_backup_cipher` for the local repository.
 
 **Restrict the credentials to that bucket alone** — but they must be complete
-credentials. pgBackRest needs four permissions, and a "write-only" key does
-not work:
+ones. pgBackRest needs to list, read, write and delete; a "write-only" key
+does not work, and a missing **list** permission surfaces as `AccessDenied` on
+a fresh repository rather than as a missing object. Protection against
+ransomware comes from object lock, not from removing the read permission.
 
-| Operation | Scope | Why |
-|---|---|---|
-| list | the **bucket** | the one that gets forgotten: it is a bucket permission, not an object one |
-| read | objects | `backup.info` is read before every backup |
-| write | objects | the backups themselves |
-| delete | objects | `expire` enforces retention |
-
-Missing the list permission produces a misleading failure: S3 answers **403 on
-an object that does not exist** rather than 404, so that a caller who may not
-list cannot learn what exists. On a fresh repository every path is missing, so
-the first call fails with `AccessDenied` and looks like a credentials problem.
-
-Protection against ransomware does not come from removing the read
-permission — it comes from **object lock** or versioning on the bucket, where
-writes stay possible and deletions are neutralised server-side.
-
-**If the bucket filters by source IP, the recovery host must be in the
-allow-list too.** A standby server built in a hurry, with a different egress
-address, is refused with the same `AccessDenied` that a permission problem
-gives — at the worst possible moment. Decide now: pre-authorise the range a
-recovery would come from, or make adding the address step one of the
-procedure.
-
-> **Internal object storage must serve HTTPS.** pgBackRest speaks TLS to an S3
-> repository. Against a plaintext endpoint the call does not fail: it *hangs*.
-> And an `archive_command` that hangs blocks PostgreSQL's shutdown — on a
-> first start the container dies with `pg_ctl: server does not shut down`, a
-> symptom that points at nothing related to storage. For an internal MinIO,
-> serve HTTPS and provide its authority:
->
-> ```yaml
-> ciso_backup_s3:
->   storage_ca_file: "/opt/ciso-toolbox/certs/minio-ca.crt"   # HOST path
->   uri_style: "path"                                          # MinIO addresses by path
-> ```
->
-> The playbook then activates one more overlay, which mounts the certificate
-> into each container itself — you only give its path on the host. Public
-> providers present trusted certificates and need none of this.
+The full table, the reason behind the misleading 403, and the source-IP
+filtering case are in the suite's
+[RECOVERY.md](https://github.com/CISOToolbox/suite/blob/main/RECOVERY.md) —
+they describe the product, not this template, and are kept in one place so a
+correction cannot land on only one side.
 
 ## What enabling it changes on the host
 
 WAL archiving switches to **asynchronous**, and that is not a performance
-detail. WAL is pushed to *every* repository; without asynchronous archiving,
-one unreachable repository stops the others from moving more than one segment
-ahead. The `archive_command` then fails, WAL accumulates in `pg_wal`, the disk
-fills, the database stops.
+detail: without it, one unreachable repository stops the others from moving
+more than one segment ahead, `pg_wal` fills, and the database stops. The
+playbook therefore enables it together with the second repository, and
+allocates one queue volume per database.
 
-In other words: without that setting, the off-site backup — meant to protect
-against losing the host — would cause exactly that, at a time chosen by the
-storage provider. The playbook therefore enables it together with the second
-repository, and allocates one queue volume per database.
+Why that is so, and what an internal object storage must serve, is explained
+in [RECOVERY.md](https://github.com/CISOToolbox/suite/blob/main/RECOVERY.md).
 
 ## Checking
 
@@ -380,22 +346,11 @@ A recovery is not only a restore. Four things must be true *before* the host
 is lost, and each of them was found the hard way during a real rehearsal on a
 second machine.
 
-**The vault is the only artefact that cannot be reconstructed.** Backups hold
-database contents; they do not hold `ENCRYPTION_KEY`, `DB_PASSWORD`,
-`JWT_SECRET`, the identity-provider secrets, or the S3 credentials — and they
-could not, since those are what you need to *open* the repository. The
-encrypted `group_vars/all/vault.yml` must therefore live somewhere
-independent of the machine it protects: a password manager, a corporate
-vault, offline media. Keep it **encrypted** wherever it travels; only the
-vault password moves out of band.
-
-**The recovery host must be sized like the original.** The suite is 22
-containers, ten of them PostgreSQL. A rehearsal on a 2 GB machine failed in a
-way that pointed nowhere useful: the module containers restarted in a
-sub-second loop, exit code 0, no OOM signature, `docker stats` showing barely
-400 MB in use — because a container that dies before doing any work never
-reaches its working set. The same deployment ran cleanly at 8 GB. Discovering
-this during an actual outage would be the worst possible moment.
+**The vault is the only artefact backups cannot reconstruct**, and **the
+recovery host must be sized like the original** — both are product-level facts,
+explained with their failure modes in
+[RECOVERY.md](https://github.com/CISOToolbox/suite/blob/main/RECOVERY.md).
+What follows is specific to this template.
 
 **Build the host file with `extract-env.sh`, never by hand.** The script
 carries the whole `.env` and splits secrets from the rest. A hand-written
@@ -429,17 +384,17 @@ first task fails on `sudo: a password is required`.
 
 ## Rehearsing a recovery
 
-A rehearsal differs from a real recovery in one way that matters: the
-original host is still alive. Both deployments then share the same off-site
-repository, and the restored copy's `backup-agent` will apply its own
-retention — expiring backups belonging to the source. Stop it as soon as the
-restore succeeds:
+A rehearsal leaves the original host alive, so both deployments share one
+off-site repository and the restored copy's agent will expire the source's
+backups. Stop it as soon as the restore succeeds:
 
 ```bash
 sudo docker compose stop backup-agent
 ```
 
-In a real recovery the question does not arise, the old host being gone.
+In a real recovery the question does not arise, the old host being gone. The
+other differences between a rehearsal and the real thing are in
+[RECOVERY.md](https://github.com/CISOToolbox/suite/blob/main/RECOVERY.md).
 
 ---
 
