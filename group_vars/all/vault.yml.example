@@ -22,7 +22,7 @@ vault_backup_agent_token: "change-me"
 # Identity provider (leave empty for AUTH_MODE=none, testing only)
 vault_entra_client_id:     ""
 vault_entra_client_secret: ""
-vault_entra_tenant_id:     "common"
+vault_entra_tenant_id:     ""   # your tenant GUID — required for Entra ID ("common" is refused)
 
 # Registry, only when private client images are deployed
 vault_registry_password: ""
